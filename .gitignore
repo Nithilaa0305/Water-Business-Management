@@ -1,0 +1,21 @@
+# secrets and local settings - never commit these
+.env
+.env.*
+*.pem
+*.key
+config.local.*
+
+# database dumps and backups (they contain real business data)
+*.dump
+*.backup
+*.bak
+backup/
+dumps/
+
+# editors, logs and system files
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+node_modules/
