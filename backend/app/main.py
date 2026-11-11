@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, close_db
-from app.routers import auth
+from app.routers import auth, users
 
 
 # --- Lifespan: runs startup and shutdown code ---
@@ -54,7 +54,7 @@ app.add_middleware(
 # --- Register routers (each router = one module) ---
 # As we build more modules, we import and add them here.
 app.include_router(auth.router)
-# app.include_router(users.router)      ← We add these one by one as we build them
+app.include_router(users.router)
 # app.include_router(products.router)
 # app.include_router(customers.router)
 # etc.
