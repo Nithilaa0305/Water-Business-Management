@@ -19,3 +19,12 @@ dumps/
 .DS_Store
 Thumbs.db
 node_modules/
+
+# Python virtual environments and cache
+venv/
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+!backend/.env.example
