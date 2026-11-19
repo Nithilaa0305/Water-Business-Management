@@ -5,12 +5,19 @@
 #          and starts/stops the database connection.
 # ============================================================
 
+import sys
+import asyncio
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, close_db
-from app.routers import auth, users, lists
+from app.routers import auth, users, lists, operations
 
 
 # --- Lifespan: runs startup and shutdown code ---
@@ -51,11 +58,21 @@ app.add_middleware(
     allow_headers=["*"],        # Allow all headers including Authorization
 )
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc) or "Internal Server Error"}
+    )
+
 # --- Register routers (each router = one module) ---
 # As we build more modules, we import and add them here.
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(lists.router)
+app.include_router(operations.router)
 # app.include_router(products.router)
 # app.include_router(customers.router)
 # etc.

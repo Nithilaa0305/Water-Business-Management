@@ -1,0 +1,10 @@
+{
+  "description": "A simple bilingual wholesale billing app helps shop sellers manage sales, stock, customer balances, payments, returns, and reports with clear, easy-to-use controls.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

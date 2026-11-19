@@ -28,29 +28,55 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/sign-in", response_model=TokenResponse)
 async def sign_in(body: SignInRequest, db: AsyncConnection = Depends(get_db)):
     """
-    Sign in with username and PIN.
+    Sign in with username (or role) and PIN.
 
+    - Supports username/pin as well as role/pin from the POS frontend
     - Calls the database function: sign_in(username, pin)
-    - The DB function checks the PIN using bcrypt (secure hashing)
-    - If correct, the DB creates a session and returns a session_id
-    - We then wrap that session_id in a JWT token and return it
-
-    The frontend stores this token and sends it with every future request.
+    - Returns JWT token and user info
     """
     try:
+        username = None
+        if body.username:
+            username = body.username.lower().strip()
+        elif body.role:
+            role_target = body.role.lower().strip()
+            # Find user with matching role and matching PIN hash
+            user_match = await db.execute(
+                """
+                SELECT username FROM app_users
+                WHERE user_role = %s AND is_active AND pin_hash = crypt(%s, pin_hash)
+                LIMIT 1
+                """,
+                (role_target, body.pin)
+            )
+            matched_row = await user_match.fetchone()
+            if matched_row:
+                username = matched_row["username"]
+            else:
+                fallback = await db.execute(
+                    "SELECT username FROM app_users WHERE (user_role = %s OR username = %s) AND is_active LIMIT 1",
+                    (role_target, role_target)
+                )
+                fallback_row = await fallback.fetchone()
+                if fallback_row:
+                    username = fallback_row["username"]
+                else:
+                    raise HTTPException(status_code=401, detail=f"No user found for role '{body.role}'")
+        else:
+            raise HTTPException(status_code=400, detail="Must provide username or role")
+
         # Step 1: Call the database sign_in() function
-        # This checks the PIN and creates a session in user_sessions table
         result = await db.execute(
             "SELECT sign_in(%s, %s) AS session_id",
-            (body.username.lower().strip(), body.pin)
+            (username, body.pin)
         )
         row = await result.fetchone()
         session_id = str(row["session_id"])
 
-        # Step 2: Get the user's details (name, role) so we can put them in the token
+        # Step 2: Get the user's details
         user_result = await db.execute(
-            "SELECT user_id, full_name, user_role FROM app_users WHERE username = %s AND is_active",
-            (body.username.lower().strip(),)
+            "SELECT user_id, full_name, user_role, username FROM app_users WHERE username = %s AND is_active",
+            (username,)
         )
         user = await user_result.fetchone()
 
@@ -58,8 +84,6 @@ async def sign_in(body: SignInRequest, db: AsyncConnection = Depends(get_db)):
             raise HTTPException(status_code=400, detail="User not found after sign-in")
 
         # Step 3: Create the JWT token
-        # The token contains user_id, session_id, and role
-        # The frontend will send this token in the Authorization header for all future requests
         token_data = {
             "user_id": str(user["user_id"]),
             "session_id": session_id,
@@ -76,7 +100,14 @@ async def sign_in(body: SignInRequest, db: AsyncConnection = Depends(get_db)):
             access_token=access_token,
             user_id=str(user["user_id"]),
             full_name=user["full_name"],
-            role=user["user_role"]
+            role=user["user_role"],
+            user={
+                "id": str(user["user_id"]),
+                "name": user["full_name"],
+                "full_name": user["full_name"],
+                "role": user["user_role"],
+                "username": user["username"]
+            }
         )
 
     except HTTPException:
