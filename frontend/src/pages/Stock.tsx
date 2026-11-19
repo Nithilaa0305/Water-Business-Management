@@ -152,11 +152,11 @@ export function Stock({
 
         setProducts(mapped);
         setSelectedProduct((curr) => {
-          if (curr) {
-            const found = mapped.find((m) => (m.type_id && m.type_id === curr.type_id) || m.id === curr.id);
+          if (curr && curr.type_id) {
+            const found = mapped.find((m) => m.type_id === curr.type_id);
             if (found) return found;
           }
-          return mapped[0] || null;
+          return null;
         });
         setLoadingProducts(false);
       })
@@ -206,8 +206,15 @@ export function Stock({
       setSelectedBatchId("");
       setShowReduceDamage(false);
       loadBatchesAndMovements(selectedProduct.type_id);
+    } else {
+      setSellingPrice("");
+      setQty("");
+      setBatchBuyingPrice("");
+      setReduceQty("");
+      setSelectedBatchId("");
+      setShowReduceDamage(false);
     }
-  }, [selectedProduct?.id, selectedProduct?.type_id]);
+  }, [selectedProduct?.type_id]);
 
   // Direct Stock Receive
   const handleAddStock = async () => {
@@ -323,6 +330,9 @@ export function Stock({
           : (lang === "ta" ? `பொருள் '${prod.name}' மீண்டும் இயக்கப்பட்டது.` : `Product '${prod.name}' restored.`),
         "success"
       );
+      if (isArchiving && selectedProduct?.type_id === prod.type_id) {
+        setSelectedProduct(null);
+      }
       loadProducts();
       window.dispatchEvent(new CustomEvent("refresh-stock-data"));
     } catch (err: unknown) {

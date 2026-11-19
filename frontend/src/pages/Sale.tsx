@@ -40,15 +40,18 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   } | null>(null);
   const [retryingCan, setRetryingCan] = useState(false);
 
-  // Helper for stable product identity
-  const getProductKey = (p: Product) => p.type_id || String(p.id);
+  // Helper for stable product identity - strictly type_id only, no row-number fallback
+  const getProductKey = (p: Product) => (p.type_id ? String(p.type_id) : "");
 
   // Active products set & missing cart items detection
-  const activeTypeIds = new Set(products.map(getProductKey));
+  const activeTypeIds = new Set(products.map(getProductKey).filter(Boolean));
   const missingCartEntries = Object.entries(cart).filter(([key, qty]) => qty > 0 && !activeTypeIds.has(key));
   const hasMissingCartItems = missingCartEntries.length > 0;
 
-  const total = products.reduce((sum, p) => sum + p.price * (cart[getProductKey(p)] || 0), 0);
+  const total = products.reduce((sum, p) => {
+    const key = getProductKey(p);
+    return key ? sum + p.price * (cart[key] || 0) : sum;
+  }, 0);
 
   // Sync cashReceived with current invoice total when cash mode active and not overridden
   useEffect(() => {
@@ -171,6 +174,10 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   // Quantity input handling: allows temporarily blank, validates on change and commit
   const handleQuantityChange = (prod: Product, val: string) => {
     const key = getProductKey(prod);
+    if (!key) {
+      showToast(lang === "ta" ? "இந்த பொருளுக்கு சரியான type_id இல்லை" : "Product has no valid type_id and cannot be selected", "error");
+      return;
+    }
     setEditingQty((prev) => ({ ...prev, [key]: val }));
     if (val.trim() === "") {
       setCart((c) => ({ ...c, [key]: 0 }));
@@ -192,6 +199,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
 
   const handleQuantityCommit = (prod: Product) => {
     const key = getProductKey(prod);
+    if (!key) return;
     const rawVal = editingQty[key];
     if (rawVal === undefined) return;
     if (rawVal.trim() === "") {
@@ -220,6 +228,10 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
 
   const add = (prod: Product, delta: number) => {
     const key = getProductKey(prod);
+    if (!key) {
+      showToast(lang === "ta" ? "இந்த பொருளுக்கு சரியான type_id இல்லை" : "Product has no valid type_id and cannot be selected", "error");
+      return;
+    }
     const current = cart[key] || 0;
     const nextVal = current + delta;
     if (nextVal < 0) return;
@@ -664,29 +676,39 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
             </div>
             <div className="product-grid">
               {regularWaterProducts.map((p) => {
+                const hasValidTypeId = Boolean(p.type_id);
                 const key = getProductKey(p);
-                const currentQty = cart[key] || 0;
-                const displayQty = editingQty[key] !== undefined ? editingQty[key] : String(currentQty);
+                const currentQty = key ? cart[key] || 0 : 0;
+                const displayQty = key && editingQty[key] !== undefined ? editingQty[key] : String(currentQty);
                 return (
-                  <div className={`product-card ${p.stock < 10 ? "low" : ""}`} key={key}>
-                    <button className="product-main" onClick={() => add(p, 1)}>
+                  <div className={`product-card ${p.stock < 10 ? "low" : ""}`} key={key || `no-type-${p.id}`}>
+                    <button
+                      className="product-main"
+                      disabled={!hasValidTypeId}
+                      onClick={() => {
+                        if (!hasValidTypeId) return;
+                        add(p, 1);
+                      }}
+                      style={!hasValidTypeId ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                    >
                       <span className="product-icon">
                         <Icon name={p.icon} size={36} />
                       </span>
                       <b className="product-title">{lang === "ta" ? p.ta : p.name}</b>
                       <strong className="product-price-tag">{formatMoney(p.price)}</strong>
                       <span className={`stock-badge ${p.stock < 10 ? "low" : ""}`}>
-                        {p.stock} {p.unit || t("stock")}
+                        {hasValidTypeId ? `${p.stock} ${p.unit || t("stock")}` : (lang === "ta" ? "தேர்வு செய்ய முடியாது" : "Not selectable")}
                       </span>
                     </button>
                     <div className="quantity-control">
-                      <button type="button" onClick={() => add(p, -1)} aria-label="Decrease quantity">
+                      <button type="button" disabled={!hasValidTypeId} onClick={() => add(p, -1)} aria-label="Decrease quantity">
                         <Icon name="minus" size={16} />
                       </button>
                       <input
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
+                        disabled={!hasValidTypeId}
                         value={displayQty}
                         onChange={(e) => handleQuantityChange(p, e.target.value)}
                         onBlur={() => handleQuantityCommit(p)}
@@ -703,11 +725,12 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                           fontSize: 16,
                           border: "1px solid #cbd5e1",
                           borderRadius: 8,
-                          background: "#ffffff",
+                          background: hasValidTypeId ? "#ffffff" : "#f1f5f9",
                           margin: "0 4px",
+                          cursor: hasValidTypeId ? "text" : "not-allowed",
                         }}
                       />
-                      <button type="button" onClick={() => add(p, 1)} aria-label="Increase quantity">
+                      <button type="button" disabled={!hasValidTypeId} onClick={() => add(p, 1)} aria-label="Increase quantity">
                         <Icon name="plus" size={16} />
                       </button>
                     </div>
@@ -725,29 +748,39 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                 </div>
                 <div className="product-grid single-row">
                   {emptyCanProducts.map((p) => {
+                    const hasValidTypeId = Boolean(p.type_id);
                     const key = getProductKey(p);
-                    const currentQty = cart[key] || 0;
-                    const displayQty = editingQty[key] !== undefined ? editingQty[key] : String(currentQty);
+                    const currentQty = key ? cart[key] || 0 : 0;
+                    const displayQty = key && editingQty[key] !== undefined ? editingQty[key] : String(currentQty);
                     return (
-                      <div className={`product-card empty-can-card ${p.stock < 10 ? "low" : ""}`} key={key}>
-                        <button className="product-main" onClick={() => add(p, 1)}>
+                      <div className={`product-card empty-can-card ${p.stock < 10 ? "low" : ""}`} key={key || `no-type-${p.id}`}>
+                        <button
+                          className="product-main"
+                          disabled={!hasValidTypeId}
+                          onClick={() => {
+                            if (!hasValidTypeId) return;
+                            add(p, 1);
+                          }}
+                          style={!hasValidTypeId ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                        >
                           <span className="product-icon">
                             <Icon name="can" size={36} />
                           </span>
                           <b className="product-title">{lang === "ta" ? p.ta : p.name}</b>
                           <strong className="product-price-tag">{formatMoney(p.price)}</strong>
                           <span className="stock-badge">
-                            {p.stock} {p.unit || t("stock")}
+                            {hasValidTypeId ? `${p.stock} ${p.unit || t("stock")}` : (lang === "ta" ? "தேர்வு செய்ய முடியாது" : "Not selectable")}
                           </span>
                         </button>
                         <div className="quantity-control">
-                          <button type="button" onClick={() => add(p, -1)} aria-label="Decrease quantity">
+                          <button type="button" disabled={!hasValidTypeId} onClick={() => add(p, -1)} aria-label="Decrease quantity">
                             <Icon name="minus" size={16} />
                           </button>
                           <input
                             type="text"
                             inputMode="numeric"
                             pattern="[0-9]*"
+                            disabled={!hasValidTypeId}
                             value={displayQty}
                             onChange={(e) => handleQuantityChange(p, e.target.value)}
                             onBlur={() => handleQuantityCommit(p)}
@@ -764,11 +797,12 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                               fontSize: 16,
                               border: "1px solid #cbd5e1",
                               borderRadius: 8,
-                              background: "#ffffff",
+                              background: hasValidTypeId ? "#ffffff" : "#f1f5f9",
                               margin: "0 4px",
+                              cursor: hasValidTypeId ? "text" : "not-allowed",
                             }}
                           />
-                          <button type="button" onClick={() => add(p, 1)} aria-label="Increase quantity">
+                          <button type="button" disabled={!hasValidTypeId} onClick={() => add(p, 1)} aria-label="Increase quantity">
                             <Icon name="plus" size={16} />
                           </button>
                         </div>
