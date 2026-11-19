@@ -276,7 +276,8 @@ async def list_products(
                 WHEN t.type_name ILIKE '%19%l%water%' OR (t.type_name ILIKE '%19%l%' AND NOT t.is_returnable_container) THEN 5
                 WHEN t.type_name ILIKE '%empty%' OR t.is_returnable_container THEN 6
                 ELSE 10
-            END ASC
+            END ASC,
+            t.type_name ASC
     """)
     rows = await res.fetchall()
 
@@ -663,18 +664,27 @@ async def create_sale_endpoint(
 
     for itm in body.items:
         chosen_type = None
-        if itm.type_id and str(itm.type_id) in type_by_uuid:
-            chosen_type = type_by_uuid[str(itm.type_id)]
+        if itm.type_id:
+            if str(itm.type_id) in type_by_uuid:
+                chosen_type = type_by_uuid[str(itm.type_id)]
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Product with type_id {itm.type_id} is no longer available or inactive"
+                )
         elif itm.product_id:
-            p_str = str(itm.product_id).strip().lower()
-            for idx, t in enumerate(all_types, start=1):
-                t_name = t["type_name"].lower()
-                if str(idx) == p_str or p_str in t_name:
-                    chosen_type = t
-                    break
+            p_str = str(itm.product_id).strip()
+            if p_str in type_by_uuid:
+                chosen_type = type_by_uuid[p_str]
+            else:
+                # Fallback search by type_name match
+                for t in all_types:
+                    if t["type_name"].lower() == p_str.lower():
+                        chosen_type = t
+                        break
 
-        if not chosen_type and all_types:
-            chosen_type = all_types[0]
+        if not chosen_type:
+            raise HTTPException(status_code=400, detail="Invalid product item in invoice")
 
         if chosen_type:
             price = itm.price if (itm.price is not None and itm.price > 0) else float(chosen_type["default_selling_price"] or 0)

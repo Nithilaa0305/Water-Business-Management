@@ -14,8 +14,8 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   const [step, setStep] = useState(1);
   const [customer, setCustomer] = useState(sampleCustomers[0]);
   const [query, setQuery] = useState("");
-  const [cart, setCart] = useState<Record<number, number>>({});
-  const [editingQty, setEditingQty] = useState<Record<number, string>>({});
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [editingQty, setEditingQty] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState<boolean>(true);
@@ -40,7 +40,15 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   } | null>(null);
   const [retryingCan, setRetryingCan] = useState(false);
 
-  const total = products.reduce((sum, p) => sum + p.price * (cart[p.id] || 0), 0);
+  // Helper for stable product identity
+  const getProductKey = (p: Product) => p.type_id || String(p.id);
+
+  // Active products set & missing cart items detection
+  const activeTypeIds = new Set(products.map(getProductKey));
+  const missingCartEntries = Object.entries(cart).filter(([key, qty]) => qty > 0 && !activeTypeIds.has(key));
+  const hasMissingCartItems = missingCartEntries.length > 0;
+
+  const total = products.reduce((sum, p) => sum + p.price * (cart[getProductKey(p)] || 0), 0);
 
   // Sync cashReceived with current invoice total when cash mode active and not overridden
   useEffect(() => {
@@ -60,7 +68,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
         if (reqId !== lastStockReqIdRef.current) return;
         const rows = Array.isArray(result) ? result : (result.products ?? []);
         const mapped: Product[] = rows.map((row, index) => {
-          const isCan = "can" in (row.unit || "").toLowerCase() || "19" in (row.name || "") || "5 L" in (row.name || "");
+          const isCan = (row.unit || "").toLowerCase().includes("can") || (row.name || "").includes("19") || (row.name || "").includes("5 L");
           return {
             id: Number(row.id ?? index + 1),
             type_id: row.type_id ? String(row.type_id) : undefined,
@@ -162,9 +170,10 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
 
   // Quantity input handling: allows temporarily blank, validates on change and commit
   const handleQuantityChange = (prod: Product, val: string) => {
-    setEditingQty((prev) => ({ ...prev, [prod.id]: val }));
+    const key = getProductKey(prod);
+    setEditingQty((prev) => ({ ...prev, [key]: val }));
     if (val.trim() === "") {
-      setCart((c) => ({ ...c, [prod.id]: 0 }));
+      setCart((c) => ({ ...c, [key]: 0 }));
       return;
     }
     const parsed = parseInt(val, 10);
@@ -177,22 +186,23 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
           "error"
         );
       }
-      setCart((c) => ({ ...c, [prod.id]: Math.min(parsed, prod.stock) }));
+      setCart((c) => ({ ...c, [key]: Math.min(parsed, prod.stock) }));
     }
   };
 
   const handleQuantityCommit = (prod: Product) => {
-    const rawVal = editingQty[prod.id];
+    const key = getProductKey(prod);
+    const rawVal = editingQty[key];
     if (rawVal === undefined) return;
     if (rawVal.trim() === "") {
-      setCart((c) => ({ ...c, [prod.id]: 0 }));
-      setEditingQty((prev) => ({ ...prev, [prod.id]: "0" }));
+      setCart((c) => ({ ...c, [key]: 0 }));
+      setEditingQty((prev) => ({ ...prev, [key]: "0" }));
       return;
     }
     const parsed = parseInt(rawVal, 10);
     if (isNaN(parsed) || parsed < 0) {
-      setCart((c) => ({ ...c, [prod.id]: 0 }));
-      setEditingQty((prev) => ({ ...prev, [prod.id]: "0" }));
+      setCart((c) => ({ ...c, [key]: 0 }));
+      setEditingQty((prev) => ({ ...prev, [key]: "0" }));
     } else if (parsed > prod.stock) {
       showToast(
         lang === "ta"
@@ -200,16 +210,17 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
           : `${prod.name}: Limited to ${prod.stock} available units!`,
         "error"
       );
-      setCart((c) => ({ ...c, [prod.id]: prod.stock }));
-      setEditingQty((prev) => ({ ...prev, [prod.id]: String(prod.stock) }));
+      setCart((c) => ({ ...c, [key]: prod.stock }));
+      setEditingQty((prev) => ({ ...prev, [key]: String(prod.stock) }));
     } else {
-      setCart((c) => ({ ...c, [prod.id]: parsed }));
-      setEditingQty((prev) => ({ ...prev, [prod.id]: String(parsed) }));
+      setCart((c) => ({ ...c, [key]: parsed }));
+      setEditingQty((prev) => ({ ...prev, [key]: String(parsed) }));
     }
   };
 
   const add = (prod: Product, delta: number) => {
-    const current = cart[prod.id] || 0;
+    const key = getProductKey(prod);
+    const current = cart[key] || 0;
     const nextVal = current + delta;
     if (nextVal < 0) return;
     if (nextVal > prod.stock) {
@@ -221,8 +232,8 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
       );
       return;
     }
-    setCart((c) => ({ ...c, [prod.id]: nextVal }));
-    setEditingQty((prev) => ({ ...prev, [prod.id]: String(nextVal) }));
+    setCart((c) => ({ ...c, [key]: nextVal }));
+    setEditingQty((prev) => ({ ...prev, [key]: String(nextVal) }));
   };
 
   const numCashReceived = payMode === "credit" ? 0 : (Number(cashReceived) || 0);
@@ -235,7 +246,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   const numCansReturn = Number(cansReturning) || 0;
   const filledCansGiven = products.reduce((sum, p) => {
     if (p.is_returnable) {
-      return sum + (cart[p.id] || 0);
+      return sum + (cart[getProductKey(p)] || 0);
     }
     return sum;
   }, 0);
@@ -243,18 +254,25 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   const cansAfterSale = cansAlreadyWithCustomer + filledCansGiven - numCansReturn;
 
   const saveInvoice = async () => {
+    if (hasMissingCartItems) {
+      setCheckoutError(lang === "ta"
+        ? "கிடைக்காத பொருட்கள் வரைவில் உள்ளன. தொடர்வதற்கு அவற்றை நீக்கவும்."
+        : "Some items in your draft are no longer available in the catalog. Please remove them before saving.");
+      return;
+    }
+
     setSaving(true);
     setCheckoutError(null);
     setCanWarning(null);
     try {
       const saleItems = Object.entries(cart)
         .filter(([, q]) => q > 0)
-        .map(([pId, quantity]) => {
-          const prod = products.find((p) => p.id === Number(pId));
+        .map(([key, quantity]) => {
+          const prod = products.find((p) => getProductKey(p) === key);
           return {
-            product_id: Number(pId),
-            type_id: prod?.type_id,
-            name: prod?.name || `Item ${pId}`,
+            product_id: prod?.id,
+            type_id: prod?.type_id || key,
+            name: prod?.name || `Item ${key}`,
             ta: prod?.ta,
             price: prod?.price || 0,
             quantity,
@@ -327,12 +345,12 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
         customer_balance: res.new_balance,
         previous_balance: customer.balance,
         items: saleItems.map((si) => {
-          const prod = products.find((p) => p.id === si.product_id);
+          const prod = products.find((p) => getProductKey(p) === (si.type_id ? String(si.type_id) : String(si.product_id)));
           return {
-            id: si.product_id,
+            id: prod?.id || si.product_id || 1,
             name: si.name,
             variant: prod && prod.name !== si.name ? prod.name : "",
-            unit: prod?.is_returnable ? "can" : "bottle",
+            unit: prod?.unit || (prod?.is_returnable ? "can" : "bottle"),
             ta: si.ta,
             quantity: si.quantity,
             price: si.price,
@@ -380,8 +398,12 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
     }
   };
 
-  const regularWaterProducts = products.filter((p) => classifyProductRank(p) !== 6);
-  const emptyCanProducts = products.filter((p) => classifyProductRank(p) === 6);
+  const isEmptyCanProduct = (p: Partial<Product>) => {
+    const n = (p.name || "").toLowerCase();
+    return n.includes("empty") || (n.includes("19") && Boolean(p.is_returnable) && !n.includes("filled") && !n.includes("water"));
+  };
+  const regularWaterProducts = products.filter((p) => !isEmptyCanProduct(p));
+  const emptyCanProducts = products.filter((p) => isEmptyCanProduct(p));
 
   return (
     <div className="workflow-page sale-page">
@@ -411,7 +433,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
           </span>
           <button
             className="btn-next-inline"
-            disabled={(step === 1 && !customer) || (step === 2 && !total)}
+            disabled={(step === 1 && !customer) || (step === 2 && (!total || hasMissingCartItems))}
             onClick={() => {
               if (step < 3) setStep(step + 1);
             }}
@@ -459,7 +481,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                     className={`customer-item-btn ${customer && customer.id === c.id ? "selected" : ""}`}
                     key={String(c.id)}
                     onClick={() => {
-                      if (customer && customer.id !== c.id && Object.keys(cart).filter(k => cart[Number(k)] > 0).length > 0) {
+                      if (customer && customer.id !== c.id && Object.values(cart).some((q) => q > 0)) {
                         if (!window.confirm(lang === "ta" ? "வாடிக்கையாளரை மாற்றினால் நடப்பு வரைவு சரக்குகள் புதிய வாடிக்கையாளருக்கு தொடரும். தொடரவா?" : "Switching customer will assign the draft items to this customer. Continue?")) {
                           return;
                         }
@@ -572,6 +594,47 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
       {step === 2 && (
         <section className="sale-step2-layout">
           <div className="product-selection-pane inside-scroll">
+            {hasMissingCartItems && (
+              <div style={{ padding: 12, marginBottom: 14, background: "#fef2f2", border: "1px solid #f87171", borderRadius: 8, color: "#991b1b" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <b>{lang === "ta" ? "கிடைக்காத பொருட்கள் வரைவில் உள்ளன:" : "Unavailable Items in Draft:"}</b>
+                    <span style={{ marginLeft: 6, fontSize: 13 }}>
+                      {lang === "ta"
+                        ? "சில பொருட்கள் பட்டியலில் இருந்து நீக்கப்பட்டுள்ளன அல்லது மாற்றப்பட்டுள்ளன. தொடர்வதற்கு அவற்றை நீக்கவும்."
+                        : "Some items in your draft are no longer available in the catalog. Remove them to proceed."}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCart((prev) => {
+                        const next = { ...prev };
+                        missingCartEntries.forEach(([k]) => delete next[k]);
+                        return next;
+                      });
+                      setEditingQty((prev) => {
+                        const next = { ...prev };
+                        missingCartEntries.forEach(([k]) => delete next[k]);
+                        return next;
+                      });
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      background: "#dc2626",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 6,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    {lang === "ta" ? "கிடைக்காதவற்றை நீக்கு" : "Remove Unavailable Items"}
+                  </button>
+                </div>
+              </div>
+            )}
             {productsError && (
               <div style={{ padding: 12, marginBottom: 12, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#b91c1c" }}>
                 <p style={{ margin: 0, fontWeight: 700 }}>
@@ -601,10 +664,11 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
             </div>
             <div className="product-grid">
               {regularWaterProducts.map((p) => {
-                const currentQty = cart[p.id] || 0;
-                const displayQty = editingQty[p.id] !== undefined ? editingQty[p.id] : String(currentQty);
+                const key = getProductKey(p);
+                const currentQty = cart[key] || 0;
+                const displayQty = editingQty[key] !== undefined ? editingQty[key] : String(currentQty);
                 return (
-                  <div className={`product-card ${p.stock < 10 ? "low" : ""}`} key={p.id}>
+                  <div className={`product-card ${p.stock < 10 ? "low" : ""}`} key={key}>
                     <button className="product-main" onClick={() => add(p, 1)}>
                       <span className="product-icon">
                         <Icon name={p.icon} size={36} />
@@ -612,7 +676,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                       <b className="product-title">{lang === "ta" ? p.ta : p.name}</b>
                       <strong className="product-price-tag">{formatMoney(p.price)}</strong>
                       <span className={`stock-badge ${p.stock < 10 ? "low" : ""}`}>
-                        {p.stock} {t("stock")}
+                        {p.stock} {p.unit || t("stock")}
                       </span>
                     </button>
                     <div className="quantity-control">
@@ -661,10 +725,11 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                 </div>
                 <div className="product-grid single-row">
                   {emptyCanProducts.map((p) => {
-                    const currentQty = cart[p.id] || 0;
-                    const displayQty = editingQty[p.id] !== undefined ? editingQty[p.id] : String(currentQty);
+                    const key = getProductKey(p);
+                    const currentQty = cart[key] || 0;
+                    const displayQty = editingQty[key] !== undefined ? editingQty[key] : String(currentQty);
                     return (
-                      <div className={`product-card empty-can-card ${p.stock < 10 ? "low" : ""}`} key={p.id}>
+                      <div className={`product-card empty-can-card ${p.stock < 10 ? "low" : ""}`} key={key}>
                         <button className="product-main" onClick={() => add(p, 1)}>
                           <span className="product-icon">
                             <Icon name="can" size={36} />
@@ -672,7 +737,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                           <b className="product-title">{lang === "ta" ? p.ta : p.name}</b>
                           <strong className="product-price-tag">{formatMoney(p.price)}</strong>
                           <span className="stock-badge">
-                            {p.stock} {t("stock")}
+                            {p.stock} {p.unit || t("stock")}
                           </span>
                         </button>
                         <div className="quantity-control">
@@ -736,15 +801,42 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
               ) : (
                 Object.entries(cart)
                   .filter(([, q]) => q > 0)
-                  .map(([pId, q]) => {
-                    const prod = products.find((p) => p.id === Number(pId));
-                    if (!prod) return null;
-                    const displayQty = editingQty[prod.id] !== undefined ? editingQty[prod.id] : String(q);
+                  .map(([key, q]) => {
+                    const prod = products.find((p) => getProductKey(p) === key);
+                    if (!prod) {
+                      return (
+                        <div className="cart-item-row unavailable" key={key} style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 10px" }}>
+                          <div className="item-meta">
+                            <b style={{ color: "#dc2626" }}>{lang === "ta" ? "கிடைக்காத பொருள்" : "Unavailable SKU"}</b>
+                            <small style={{ color: "#991b1b" }}>ID: {key.slice(0, 8)}... × {q}</small>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCart((prev) => {
+                                const next = { ...prev };
+                                delete next[key];
+                                return next;
+                              });
+                              setEditingQty((prev) => {
+                                const next = { ...prev };
+                                delete next[key];
+                                return next;
+                              });
+                            }}
+                            style={{ padding: "4px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    }
+                    const displayQty = editingQty[key] !== undefined ? editingQty[key] : String(q);
                     return (
-                      <div className="cart-item-row" key={pId}>
+                      <div className="cart-item-row" key={key}>
                         <div className="item-meta">
                           <b>{lang === "ta" ? prod.ta : prod.name}</b>
-                          <small>{formatMoney(prod.price)} × {q}</small>
+                          <small>{formatMoney(prod.price)} × {q} {prod.unit || ""}</small>
                         </div>
                         <div className="item-stepper">
                           <button type="button" onClick={() => add(prod, -1)}>-</button>
@@ -785,7 +877,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                 <button className="back-step-btn" onClick={() => setStep(1)}>
                   ← {t("back")}
                 </button>
-                <button className="next-step-btn" disabled={!total} onClick={() => setStep(3)}>
+                <button className="next-step-btn" disabled={!total || hasMissingCartItems} onClick={() => setStep(3)}>
                   {t("next")} →
                 </button>
               </div>
@@ -812,17 +904,65 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
             </div>
 
             {/* Cart Items List */}
+            {hasMissingCartItems && (
+              <div style={{ padding: 12, marginBottom: 12, background: "#fef2f2", border: "1px solid #f87171", borderRadius: 8, color: "#991b1b" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <b style={{ fontSize: 13 }}>{lang === "ta" ? "கிடைக்காத பொருட்கள் வரைவில் உள்ளன:" : "Unavailable Items in Draft:"}</b>
+                    <small style={{ display: "block", color: "#b91c1c" }}>
+                      {lang === "ta" ? "இன்வாய்ஸ் சேமிக்க கிடைக்காத பொருட்களை நீக்கவும்." : "Remove unavailable items to enable saving this invoice."}
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCart((prev) => {
+                        const next = { ...prev };
+                        missingCartEntries.forEach(([k]) => delete next[k]);
+                        return next;
+                      });
+                      setEditingQty((prev) => {
+                        const next = { ...prev };
+                        missingCartEntries.forEach(([k]) => delete next[k]);
+                        return next;
+                      });
+                    }}
+                    style={{
+                      padding: "4px 10px",
+                      background: "#dc2626",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 6,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    {lang === "ta" ? "நீக்குக" : "Remove"}
+                  </button>
+                </div>
+              </div>
+            )}
             <h4 style={{ margin: "8px 0 6px 0", fontSize: 13, textTransform: "uppercase", color: "#64748b", letterSpacing: "0.05em" }}>
               {lang === "ta" ? "ஆர்டர் பொருட்கள் (Order Items)" : "Order Items"}
             </h4>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "8px 12px", border: "1px solid #e2e8f0", marginBottom: 14, maxHeight: 180, overflowY: "auto" }}>
-              {Object.entries(cart).filter(([, q]) => q > 0).map(([pId, q]) => {
-                const prod = products.find((p) => p.id === Number(pId));
-                if (!prod) return null;
+              {Object.entries(cart).filter(([, q]) => q > 0).map(([key, q]) => {
+                const prod = products.find((p) => getProductKey(p) === key);
+                if (!prod) {
+                  return (
+                    <div key={key} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px dashed #fca5a5", fontSize: 13, color: "#dc2626" }}>
+                      <span>
+                        <b>{lang === "ta" ? "கிடைக்காத பொருள்" : "Unavailable SKU"}</b> <small>({key.slice(0, 8)}... × {q})</small>
+                      </span>
+                      <b>-</b>
+                    </div>
+                  );
+                }
                 return (
-                  <div key={pId} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px dashed #f1f5f9", fontSize: 13 }}>
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px dashed #f1f5f9", fontSize: 13 }}>
                     <span>
-                      {lang === "ta" ? prod.ta : prod.name} <small style={{ color: "#64748b" }}>× {q}</small>
+                      {lang === "ta" ? prod.ta : prod.name} <small style={{ color: "#64748b" }}>× {q} {prod.unit || ""}</small>
                     </span>
                     <b>{formatMoney(prod.price * q)}</b>
                   </div>
@@ -1111,7 +1251,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
               <button className="back-step-btn" onClick={() => setStep(2)}>
                 ← {t("back")}
               </button>
-              <button className="primary-action" disabled={saving || !total} onClick={saveInvoice}>
+              <button className="primary-action" disabled={saving || !total || hasMissingCartItems} onClick={saveInvoice}>
                 <Icon name="check" size={22} />
                 {saving ? "..." : `${t("saveBill")} (${formatMoney(total)})`}
               </button>

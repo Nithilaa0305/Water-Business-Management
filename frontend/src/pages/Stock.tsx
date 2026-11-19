@@ -15,28 +15,72 @@ import { formatMoney } from "../utils/formatters";
 // 4. 5 L
 // 5. 19 L
 // 6. 19 L Empty Can
-const DEFAULT_CARD_SPECS = [
-  { rank: 1, name: "500 ml", matchName: "500 ml Water", ta: "500மிலி தண்ணீர்", unit: "bottle", icon: "bottle" as IconName, isReturnable: false, defaultPrice: 22 },
-  { rank: 2, name: "1 L", matchName: "1 L Water", ta: "1 லிட்டர் தண்ணீர்", unit: "bottle", icon: "bottle" as IconName, isReturnable: false, defaultPrice: 35 },
-  { rank: 3, name: "1.5 L", matchName: "1.5 L", ta: "1.5 லிட்டர் தண்ணீர்", unit: "bottle", icon: "bottle" as IconName, isReturnable: false, defaultPrice: 50 },
-  { rank: 4, name: "5 L", matchName: "5 L", ta: "5 லிட்டர் தண்ணீர்", unit: "can", icon: "can" as IconName, isReturnable: false, defaultPrice: 120 },
-  { rank: 5, name: "19 L", matchName: "19 L Water (filled)", ta: "19 லிட்டர் கேன் (நிரப்பியது)", unit: "can", icon: "can" as IconName, isReturnable: false, defaultPrice: 90 },
-  { rank: 6, name: "19 L Empty Can", matchName: "19 L Bottle (empty/new)", ta: "19 லிட்டர் காலி கேன்", unit: "can", icon: "can" as IconName, isReturnable: true, defaultPrice: 150 },
-];
-
-function classifyProductRank(p: Partial<Product>): number {
-  const n = (p.name || "").toLowerCase();
-  const isRet = Boolean(p.is_returnable);
-  if (n.includes("empty") || (isRet && (n.includes("bottle") || n.includes("can")) && !n.includes("filled") && !n.includes("water"))) {
-    return 6;
-  }
-  if (n.includes("500") && n.includes("ml")) return 1;
-  if ((n.includes("1 l") || n.includes("1l")) && !n.includes("1.5") && !n.includes("19")) return 2;
-  if (n.includes("1.5")) return 3;
-  if (n.includes("5") && (n.includes("l") || n.includes("liter")) && !n.includes("500") && !n.includes("1.5")) return 4;
-  if (n.includes("19") || (n.includes("20") && (n.includes("water") || n.includes("can")))) return 5;
-  return 10;
+export interface StarterSlotSpec {
+  rank: number;
+  label: string;
+  taLabel: string;
+  unit: string;
+  icon: IconName;
+  matchSkus: string[];
+  matchNames: string[];
 }
+
+export const STARTER_SLOTS: StarterSlotSpec[] = [
+  {
+    rank: 1,
+    label: "500 ml",
+    taLabel: "500மிலி",
+    unit: "bottle",
+    icon: "bottle",
+    matchSkus: ["SKU-500ML", "500ML", "SKU-500", "SKU-WAT-500"],
+    matchNames: ["500 ml Water", "500ml Water", "500 ml", "500ml"],
+  },
+  {
+    rank: 2,
+    label: "1 L",
+    taLabel: "1 லிட்டர்",
+    unit: "bottle",
+    icon: "bottle",
+    matchSkus: ["SKU-1L", "1L", "SKU-WAT-1L"],
+    matchNames: ["1 L Water", "1L Water", "1 L", "1L"],
+  },
+  {
+    rank: 3,
+    label: "1.5 L",
+    taLabel: "1.5 லிட்டர்",
+    unit: "bottle",
+    icon: "bottle",
+    matchSkus: ["SKU-1.5L", "1.5L", "SKU-WAT-1.5L"],
+    matchNames: ["1.5 L Water", "1.5L Water", "1.5 L", "1.5L"],
+  },
+  {
+    rank: 4,
+    label: "5 L",
+    taLabel: "5 லிட்டர்",
+    unit: "can",
+    icon: "can",
+    matchSkus: ["SKU-5L", "5L", "SKU-WAT-5L"],
+    matchNames: ["5 L Water", "5L Water", "5 L", "5L"],
+  },
+  {
+    rank: 5,
+    label: "19 L",
+    taLabel: "19 லிட்டர்",
+    unit: "can",
+    icon: "can",
+    matchSkus: ["SKU-19L", "19L", "SKU-19L-FILLED", "SKU-WAT-19L"],
+    matchNames: ["19 L Water (filled)", "19L Water (filled)", "19 L Water", "19L Water", "19 L", "19L"],
+  },
+  {
+    rank: 6,
+    label: "19 L Empty Can",
+    taLabel: "19 லிட்டர் காலி கேன்",
+    unit: "can",
+    icon: "can",
+    matchSkus: ["SKU-19L-EMPTY", "SKU-TEST-CAN-20L", "CAN-20L", "SKU-CAN-20L"],
+    matchNames: ["19 L Bottle (empty/new)", "19 L Empty Can", "Premium 20L Can (New)"],
+  },
+];
 
 export function Stock({
   token,
@@ -89,7 +133,7 @@ export function Stock({
         if (reqId !== lastStockReqIdRef.current) return;
         const rows = Array.isArray(result) ? result : (result.products ?? []);
         const mapped: Product[] = rows.map((row, index) => {
-          const isCan = "can" in (row.unit || "").toLowerCase() || "19" in (row.name || "") || "5 L" in (row.name || "");
+          const isCan = (row.unit || "").toLowerCase().includes("can") || (row.name || "").includes("19") || (row.name || "").includes("5 L");
           return {
             id: Number(row.id ?? index + 1),
             type_id: row.type_id ? String(row.type_id) : undefined,
@@ -175,7 +219,6 @@ export function Stock({
     }
 
     const payload: Record<string, any> = {
-      product_id: selectedProduct.id,
       type_id: selectedProduct.type_id,
       quantity: numQty,
       selling_price: selectedProduct.price,
@@ -231,7 +274,7 @@ export function Stock({
       await api.post(
         "/products/update",
         {
-          type_id: selectedProduct.type_id || selectedProduct.id,
+          type_id: selectedProduct.type_id,
           name: selectedProduct.name,
           selling_price: newPrice,
         },
@@ -243,7 +286,7 @@ export function Stock({
         text: lang === "ta" ? `விற்பனை விலை ${formatMoney(newPrice)} ஆக மாற்றப்பட்டது!` : `Selling price updated to ${formatMoney(newPrice)}!`,
       });
       setSelectedProduct({ ...selectedProduct, price: newPrice });
-      setProducts((prev) => prev.map((p) => (p.id === selectedProduct.id ? { ...p, price: newPrice } : p)));
+      setProducts((prev) => prev.map((p) => (p.type_id === selectedProduct.type_id ? { ...p, price: newPrice } : p)));
       loadProducts();
       loadBatchesAndMovements(selectedProduct.type_id);
       window.dispatchEvent(new CustomEvent("refresh-stock-data"));
@@ -267,7 +310,7 @@ export function Stock({
     try {
       await api.post(
         "/products/archive",
-        { type_id: prod.type_id || prod.id, action },
+        { type_id: prod.type_id, action },
         token
       );
       speak(
@@ -301,7 +344,6 @@ export function Stock({
       await api.post(
         "/stock/adjust",
         {
-          product_id: selectedProduct.id,
           type_id: selectedProduct.type_id,
           batch_id: selectedBatchId || undefined,
           quantity: numQty,
@@ -329,27 +371,40 @@ export function Stock({
     }
   };
 
-  // Build the 6 default cards strictly in order 1..6
-  const defaultSixCards: Product[] = DEFAULT_CARD_SPECS.map((spec) => {
-    const matched = products.find((p) => classifyProductRank(p) === spec.rank);
-    if (matched) return matched;
-    // Fallback template if DB has not populated this slot yet
-    return {
-      id: spec.rank,
-      name: spec.matchName,
-      ta: spec.ta,
-      price: spec.defaultPrice,
-      stock: 0,
-      unit: spec.unit,
-      icon: spec.icon,
-      is_returnable: spec.isReturnable,
-      is_active: true,
-      buying_price: null,
-    };
+  // Match 6 starter slots to explicit catalog SKUs/names; unclaimed SKUs flow to otherProducts
+  const claimedTypeIds = new Set<string>();
+  const starterCards: Array<{ slot: StarterSlotSpec; product: Product | null }> = STARTER_SLOTS.map((slot) => {
+    const match = products.find((p) => {
+      if (!p.type_id || claimedTypeIds.has(p.type_id)) return false;
+
+      // 1. Explicit SKU match
+      if (p.sku && slot.matchSkus.some((s) => s.toLowerCase() === p.sku!.trim().toLowerCase())) {
+        return true;
+      }
+
+      // 2. Explicit exact name match
+      const pName = p.name.trim().toLowerCase();
+      if (slot.matchNames.some((m) => m.toLowerCase() === pName)) {
+        if (slot.rank === 5 && (pName.includes("empty") || (p.is_returnable && !pName.includes("filled") && !pName.includes("water")))) {
+          return false;
+        }
+        if (slot.rank === 6 && !pName.includes("empty") && !p.is_returnable) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    });
+
+    if (match && match.type_id) {
+      claimedTypeIds.add(match.type_id);
+      return { slot, product: match };
+    }
+    return { slot, product: null };
   });
 
-  // Other products holding stock or added by user
-  const otherProducts = products.filter((p) => classifyProductRank(p) > 6);
+  // Every real active SKU not displayed in starter slots goes into Other Products (even if same size)
+  const otherProducts = products.filter((p) => p.type_id && !claimedTypeIds.has(p.type_id));
 
   return (
     <div className="workflow-page stock-page">
@@ -462,13 +517,57 @@ export function Stock({
 
               {/* Six default cards in exact order */}
               <div className="product-grid compact" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-                {defaultSixCards.map((p) => {
-                  const isSelected = selectedProduct && ((selectedProduct.type_id && selectedProduct.type_id === p.type_id) || selectedProduct.id === p.id);
+                {starterCards.map(({ slot, product: p }) => {
+                  if (!p) {
+                    return (
+                      <div
+                        className="product-card slot-not-set-up"
+                        key={`starter-slot-${slot.rank}`}
+                        style={{
+                          minHeight: 120,
+                          position: "relative",
+                          opacity: 0.55,
+                          background: "#f8fafc",
+                          border: "1.5px dashed #cbd5e1",
+                          cursor: "not-allowed",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 12,
+                          borderRadius: 12,
+                        }}
+                      >
+                        <span className="product-icon" style={{ opacity: 0.5 }}>
+                          <Icon name={slot.icon} size={30} />
+                        </span>
+                        <b className="product-title" style={{ fontSize: 13, marginTop: 4, color: "#64748b" }}>
+                          {lang === "ta" ? slot.taLabel : slot.label}
+                        </b>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: "#94a3b8",
+                            marginTop: 6,
+                            background: "#e2e8f0",
+                            padding: "2px 8px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          {lang === "ta" ? "அமைக்கப்படவில்லை" : "Not set up"}
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  const isSelected = selectedProduct && selectedProduct.type_id === p.type_id;
                   const isEmpties = p.is_returnable || p.name.toLowerCase().includes("empty");
                   return (
                     <button
+                      type="button"
                       className={`product-card pick ${isSelected ? "selected" : ""} ${isEmpties ? "empty-can-card" : ""}`}
-                      key={p.type_id || p.id}
+                      key={p.type_id}
                       onClick={() => { setSelectedProduct(p); setShowReduceDamage(false); }}
                       style={{ minHeight: 120, position: "relative" }}
                     >
@@ -482,7 +581,7 @@ export function Stock({
                         {formatMoney(p.price)}
                       </strong>
                       <span className={`stock-badge ${p.stock < 10 ? "low" : ""}`} style={{ fontSize: 11 }}>
-                        {p.stock} {isEmpties ? (lang === "ta" ? "காலிகள்" : "empties") : t("stock")}
+                        {p.stock} {p.unit || (isEmpties ? (lang === "ta" ? "காலிகள்" : "empties") : t("stock"))}
                       </span>
                     </button>
                   );
@@ -498,11 +597,12 @@ export function Stock({
                   </div>
                   <div className="product-grid compact" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                     {otherProducts.map((p) => {
-                      const isSelected = selectedProduct && ((selectedProduct.type_id && selectedProduct.type_id === p.type_id) || selectedProduct.id === p.id);
+                      const isSelected = selectedProduct && selectedProduct.type_id === p.type_id;
                       return (
                         <button
+                          type="button"
                           className={`product-card pick ${isSelected ? "selected" : ""}`}
-                          key={p.type_id || p.id}
+                          key={p.type_id}
                           onClick={() => { setSelectedProduct(p); setShowReduceDamage(false); }}
                         >
                           <span className="product-icon">
@@ -511,7 +611,7 @@ export function Stock({
                           <b className="product-title">{lang === "ta" ? p.ta : p.name}</b>
                           <strong className="product-price-tag">{formatMoney(p.price)}</strong>
                           <span className={`stock-badge ${p.stock < 10 ? "low" : ""}`}>
-                            {p.stock} {t("stock")}
+                            {p.stock} {p.unit || t("stock")}
                           </span>
                         </button>
                       );
@@ -1009,16 +1109,16 @@ export function Stock({
         initialFocusPrice={focusBuyingCostInModal}
         onUpdated={(updated) => {
           setSelectedProduct(updated);
-          setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+          setProducts((prev) => prev.map((p) => (p.type_id === updated.type_id ? updated : p)));
           loadProducts();
-      window.dispatchEvent(new CustomEvent("refresh-stock-data"));
+          window.dispatchEvent(new CustomEvent("refresh-stock-data"));
         }}
         onDeleted={(delId) => {
-          const remaining = products.filter((p) => p.id !== delId);
+          const remaining = products.filter((p) => p.type_id !== String(delId) && p.id !== delId);
           setProducts(remaining);
           if (remaining.length) setSelectedProduct(remaining[0]);
           loadProducts();
-      window.dispatchEvent(new CustomEvent("refresh-stock-data"));
+          window.dispatchEvent(new CustomEvent("refresh-stock-data"));
         }}
       />
     </div>
