@@ -5,6 +5,7 @@
 # ============================================================
 
 import os
+from zoneinfo import ZoneInfo
 from psycopg.rows import dict_row          # Makes query results return as dicts
 from psycopg_pool import AsyncConnectionPool  # Async connection pool
 from dotenv import load_dotenv
@@ -33,12 +34,13 @@ async def init_db():
     max_size=10 → Never allow more than 10 simultaneous connections
     """
     global _pool
+    timezone = ZoneInfo(os.getenv("SHOP_TIMEZONE", "Asia/Colombo")).key
     _pool = AsyncConnectionPool(
         conninfo=_conninfo,
         min_size=2,
         max_size=10,
         open=False,                       # We will open manually with await pool.open()
-        kwargs={"row_factory": dict_row}  # All rows returned as dict (key → value)
+        kwargs={"row_factory": dict_row, "options": f"-c timezone={timezone}"}  # All rows returned as dict (key → value)
     )
     await _pool.open()   # Open the pool properly (async, no deprecation warning)
     await _pool.wait()   # Wait until at least min_size connections are ready

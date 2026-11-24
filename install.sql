@@ -22,3 +22,4 @@
 \i database/17_cancel_and_return.sql
 \i database/18_containers_expenses_suppliers.sql
 \i database/19_reports.sql
+\i database/20_operational_integrity.sql

@@ -95,6 +95,7 @@ async def sign_in(body: SignInRequest, db: AsyncConnection = Depends(get_db)):
             expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         )
 
+        await db.commit()
         # Step 4: Return the token and user info to the frontend
         return TokenResponse(
             access_token=access_token,
@@ -139,6 +140,7 @@ async def sign_out(
             "SELECT sign_out(%s, %s)",
             (session_id, body.reason)
         )
+        await db.commit()
         return {"message": f"Signed out successfully. Goodbye, {current_user.get('full_name')}!"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -150,7 +152,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     Returns information about the currently logged-in user.
     The frontend can call this to show the user's name and role.
 
-    No DB query needed — all info is already in the JWT token.
+    The token identifies the session; the dependency checks current role and access.
     """
     return {
         "user_id": current_user.get("user_id"),

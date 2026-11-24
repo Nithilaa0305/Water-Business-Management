@@ -7,7 +7,11 @@
 
 import json
 import hashlib
+import os
+from zoneinfo import ZoneInfo
 from datetime import datetime, date, timedelta
+from decimal import Decimal
+from uuid import UUID
 from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from psycopg import AsyncConnection
@@ -25,34 +29,17 @@ async def check_idempotency(db: AsyncConnection, key: str, payload_str: str) -> 
     Checks if an operation key has already been executed or is currently in flight.
     Uses PostgreSQL to ensure persistence across server restarts.
     """
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS api_idempotency (
-            key text PRIMARY KEY,
-            payload_hash text NOT NULL,
-            status text NOT NULL, -- 'in_flight', 'completed', 'failed'
-            response_code int,
-            response_body jsonb,
-            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
-        )
-    """)
     h = hashlib.sha256(payload_str.encode()).hexdigest()
-    res = await db.execute("SELECT payload_hash, status, response_code, response_body FROM api_idempotency WHERE key = %s", (key,))
+    inserted = await db.execute(
+        "INSERT INTO api_idempotency (key, payload_hash, status) VALUES (%s, %s, 'in_flight') "
+        "ON CONFLICT (key) DO NOTHING RETURNING key", (key, h)
+    )
+    if await inserted.fetchone():
+        return None
+    res = await db.execute("SELECT payload_hash, status, response_body FROM api_idempotency WHERE key = %s", (key,))
     row = await res.fetchone()
     if not row:
-        try:
-            await db.execute(
-                "INSERT INTO api_idempotency (key, payload_hash, status) VALUES (%s, %s, 'in_flight')",
-                (key, h)
-            )
-            return None
-        except Exception as e:
-            if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Operation currently in flight. Check whether it saved."
-                )
-            raise
+        raise HTTPException(status_code=409, detail="Operation status unavailable; retry the same request.")
 
     # Key exists
     if row["payload_hash"] != h:
@@ -104,6 +91,8 @@ class CreateSaleRequest(BaseModel):
     expected_previous_balance: Optional[float] = None
     discount: Optional[float] = 0.0
     notes: Optional[str] = None
+    empty_cans_returned: int = Field(0, ge=0)
+    return_container_type_id: Optional[UUID] = None
 
 
 class StockReceiveRequest(BaseModel):
@@ -165,7 +154,7 @@ class ProductArchiveRequest(BaseModel):
 
 class CustomerTransactionRequest(BaseModel):
     customer_id: Optional[Any] = None
-    amount: float = 0.0
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, allow_inf_nan=False)
     notes: Optional[str] = None
     operation_id: Optional[str] = None
     payment_method: Optional[str] = "cash"
@@ -173,8 +162,9 @@ class CustomerTransactionRequest(BaseModel):
 
 class PaymentCorrectionRequest(BaseModel):
     payment_id: str
-    new_amount: float
-    method_id: Optional[str] = None
+    new_amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, allow_inf_nan=False)
+    method_id: Optional[UUID] = None
+    payment_method: Optional[str] = None
     reason: Optional[str] = "Correction of mistake entry"
 
 
@@ -184,10 +174,11 @@ class PaymentVoidRequest(BaseModel):
 
 
 class CreateProductRequest(BaseModel):
-    name: str
-    selling_price: float = 0.0
-    buying_price: Optional[float] = 0.0
-    initial_stock: Optional[int] = 0
+    name: str = Field(min_length=1, max_length=150)
+    tamil_name: Optional[str] = Field(None, max_length=150)
+    selling_price: float = Field(0, ge=0, allow_inf_nan=False)
+    buying_price: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
+    initial_stock: Optional[int] = Field(0, ge=0)
     unit: Optional[str] = "bottle"
     is_returnable: Optional[bool] = False
     sku: Optional[str] = None
@@ -195,7 +186,8 @@ class CreateProductRequest(BaseModel):
 
 class UpdateProductRequest(BaseModel):
     type_id: Any
-    name: str
+    name: str = Field(min_length=1, max_length=150)
+    tamil_name: Optional[str] = Field(None, max_length=150)
     selling_price: Optional[float] = None
     buying_price: Optional[float] = None
     sku: Optional[str] = None
@@ -215,6 +207,8 @@ class ReturnItemRequest(BaseModel):
     sale_item_id: str
     quantity: int
     reason: str
+    restock: bool = False
+    operation_id: Optional[str] = None
 
 
 class CancelSaleRequest(BaseModel):
@@ -240,24 +234,13 @@ async def list_products(
     is_manager_or_owner = role in ("owner", "manager")
     active_clause = "WHERE NOT t.is_active" if show_archived else "WHERE t.is_active"
 
-    # Check whether default_buying_price column exists on product_types
-    has_buy_col = True
-    try:
-        col_chk = await db.execute("SELECT 1 FROM information_schema.columns WHERE table_name = 'product_types' AND column_name = 'default_buying_price'")
-        has_buy_col = bool(await col_chk.fetchone())
-    except Exception:
-        has_buy_col = False
-
-    buy_col_sel = "t.default_buying_price" if has_buy_col else "NULL::numeric AS default_buying_price"
-    buy_col_grp = ", t.default_buying_price" if has_buy_col else ""
-
     res = await db.execute(f"""
         SELECT 
             t.type_id,
             t.type_name,
             t.sku,
             t.default_selling_price,
-            {buy_col_sel},
+            t.default_buying_price, t.tamil_name, t.low_stock_limit,
             t.is_returnable_container,
             t.is_active,
             u.unit_name,
@@ -266,7 +249,7 @@ async def list_products(
         LEFT JOIN units u ON u.unit_id = t.unit_id
         LEFT JOIN stock_batches b ON b.type_id = t.type_id AND b.current_quantity > 0
         {active_clause}
-        GROUP BY t.type_id, t.type_name, t.sku, t.default_selling_price{buy_col_grp}, t.is_returnable_container, t.is_active, u.unit_name
+        GROUP BY t.type_id, t.type_name, t.sku, t.default_selling_price, t.is_returnable_container, t.is_active, u.unit_name
         ORDER BY 
             CASE 
                 WHEN t.type_name ILIKE '%500%ml%' THEN 1
@@ -293,7 +276,7 @@ async def list_products(
     products = []
     for idx, r in enumerate(rows, start=1):
         name = r["type_name"]
-        ta = tamil_names.get(name, name)
+        ta = r["tamil_name"] or tamil_names.get(name, name)
         is_can = "can" in (r["unit_name"] or "").lower() or "19" in name or "5 L" in name
         item = {
             "id": idx,
@@ -303,6 +286,7 @@ async def list_products(
             "ta": ta,
             "price": float(r["default_selling_price"] or 0),
             "stock": int(r["stock"] or 0),
+            "low_stock_limit": r["low_stock_limit"],
             "unit": r["unit_name"] or "bottle",
             "is_returnable": bool(r["is_returnable_container"]),
             "is_active": bool(r["is_active"]),
@@ -311,6 +295,14 @@ async def list_products(
         }
         products.append(item)
     return products
+
+
+def stock_type_id(body) -> str:
+    # Older clients may send the UUID under product_id; never interpret it as a row number or label.
+    try:
+        return str(UUID(str(body.type_id or body.product_id)))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Select a valid product variant") from None
 
 
 @router.post("/products/price")
@@ -325,35 +317,21 @@ async def change_price_endpoint(
     Atomic: if any batch price update fails, the entire transaction fails (no swallowed errors).
     """
     user_id = current_user.get("user_id")
-    type_id = None
-    if body.type_id:
-        chk = await db.execute("SELECT type_id FROM product_types WHERE type_id = %s::uuid", (str(body.type_id),))
-        t_row = await chk.fetchone()
-        if t_row:
-            type_id = str(t_row["type_id"])
-
-    if not type_id and body.product_id:
-        all_types_res = await db.execute("SELECT type_id, type_name FROM product_types WHERE is_active ORDER BY default_selling_price")
-        all_types = await all_types_res.fetchall()
-        p_str = str(body.product_id).strip().lower()
-        for idx, t in enumerate(all_types, start=1):
-            if str(idx) == p_str or p_str in t["type_name"].lower():
-                type_id = str(t["type_id"])
-                break
-
-    if not type_id:
-        raise HTTPException(status_code=400, detail="Product variant not found")
+    type_id = stock_type_id(body)
 
     price_val = body.new_price if body.new_price is not None else body.selling_price
-    if price_val is None:
-        raise HTTPException(status_code=400, detail="Price is required")
-    new_price = max(0.0, float(price_val))
+    if price_val is None or not Decimal(str(price_val)).is_finite() or price_val < 0:
+        raise HTTPException(status_code=400, detail="Enter a valid nonnegative price")
+    new_price = float(price_val)
 
     # Update product_types default selling price
-    await db.execute(
-        "UPDATE product_types SET default_selling_price = %s, updated_at = CURRENT_TIMESTAMP WHERE type_id = %s::uuid",
+    updated = await db.execute(
+        "UPDATE product_types SET default_selling_price = %s, updated_at = CURRENT_TIMESTAMP WHERE type_id = %s::uuid AND is_active RETURNING type_id",
         (new_price, type_id)
     )
+
+    if not await updated.fetchone():
+        raise HTTPException(status_code=404, detail="Active product not found")
 
     # Update active batches selling price via SQL function set_batch_selling_price
     batches_res = await db.execute(
@@ -373,14 +351,15 @@ async def change_price_endpoint(
     p_name = p_row["type_name"] if p_row else "item"
     await db.execute(
         "INSERT INTO activity_log (user_id, action_type, description) VALUES (%s, 'price_changed', %s)",
-        (user_id, f"Changed selling price of {p_name} to ₹{new_price}")
+        (user_id, f"Changed selling price of {p_name} to Rs. {new_price}")
     )
 
+    await db.commit()
     return {
         "status": "success",
         "type_id": type_id,
         "new_price": new_price,
-        "message": f"Selling price of {p_name} updated to ₹{new_price}"
+        "message": f"Selling price of {p_name} updated to Rs. {new_price}"
     }
 
 
@@ -403,72 +382,20 @@ async def create_product_endpoint(
     u_res = await db.execute("SELECT unit_id FROM units WHERE LOWER(unit_name) = %s LIMIT 1", (unit_name,))
     u_row = await u_res.fetchone()
     if not u_row:
-        u_res = await db.execute("SELECT unit_id FROM units LIMIT 1")
-        u_row = await u_res.fetchone()
-    unit_id = str(u_row["unit_id"]) if u_row else None
-
+        raise HTTPException(status_code=400, detail="Unsupported selling unit")
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Product name is required")
+    if body.initial_stock and (body.buying_price is None or body.selling_price <= 0):
+        raise HTTPException(status_code=400, detail="Opening stock needs a buying cost and a positive selling price")
     import uuid
-    sku = body.sku.strip() if (body.sku and body.sku.strip()) else f"SKU-{body.name[:3].upper()}-{int(body.selling_price)}-{uuid.uuid4().hex[:4].upper()}"
-
-    has_buy_col = True
-    try:
-        col_chk = await db.execute("SELECT 1 FROM information_schema.columns WHERE table_name = 'product_types' AND column_name = 'default_buying_price'")
-        has_buy_col = bool(await col_chk.fetchone())
-    except Exception:
-        has_buy_col = False
-
-    def_buying = float(body.buying_price) if body.buying_price is not None else None
-
-    if has_buy_col:
-        ins_res = await db.execute(
-            """
-            INSERT INTO product_types (
-                product_id,
-                type_name,
-                sku,
-                unit_id,
-                default_selling_price,
-                default_buying_price,
-                is_returnable_container,
-                is_active
-            )
-            VALUES (%s::uuid, %s, %s, %s::uuid, %s, %s, %s, TRUE)
-            RETURNING type_id
-            """,
-            (
-                product_id,
-                body.name.strip(),
-                sku,
-                unit_id,
-                max(0.0, float(body.selling_price)),
-                def_buying,
-                bool(body.is_returnable)
-            )
-        )
-    else:
-        ins_res = await db.execute(
-            """
-            INSERT INTO product_types (
-                product_id,
-                type_name,
-                sku,
-                unit_id,
-                default_selling_price,
-                is_returnable_container,
-                is_active
-            )
-            VALUES (%s::uuid, %s, %s, %s::uuid, %s, %s, TRUE)
-            RETURNING type_id
-            """,
-            (
-                product_id,
-                body.name.strip(),
-                sku,
-                unit_id,
-                max(0.0, float(body.selling_price)),
-                bool(body.is_returnable)
-            )
-        )
+    sku = body.sku.strip() if (body.sku and body.sku.strip()) else f"SKU-{uuid.uuid4().hex[:10].upper()}"
+    ins_res = await db.execute(
+        """INSERT INTO product_types (product_id, type_name, tamil_name, sku, unit_id,
+                   default_selling_price, default_buying_price, is_returnable_container)
+           VALUES (%s::uuid,%s,%s,%s,%s::uuid,%s,%s,%s) RETURNING type_id""",
+        (product_id, body.name.strip(), (body.tamil_name or "").strip() or None, sku, str(u_row["unit_id"]),
+         body.selling_price, body.buying_price, body.is_returnable),
+    )
     new_pt = await ins_res.fetchone()
     type_id = str(new_pt["type_id"])
 
@@ -529,22 +456,24 @@ async def update_product_endpoint(
         updates.append("sku = %s")
         params.append(body.sku.strip())
 
-    if body.buying_price is not None:
-        has_buy_col = True
-        try:
-            col_chk = await db.execute("SELECT 1 FROM information_schema.columns WHERE table_name = 'product_types' AND column_name = 'default_buying_price'")
-            has_buy_col = bool(await col_chk.fetchone())
-        except Exception:
-            has_buy_col = False
-        if has_buy_col:
-            updates.append("default_buying_price = %s")
-            params.append(max(0.0, float(body.buying_price)))
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Product name is required")
+    if "tamil_name" in body.model_fields_set:
+        updates.append("tamil_name = %s")
+        params.append((body.tamil_name or "").strip() or None)
+    if "buying_price" in body.model_fields_set:
+        if body.buying_price is not None and (not Decimal(str(body.buying_price)).is_finite() or body.buying_price < 0):
+            raise HTTPException(status_code=400, detail="Buying cost must not be negative")
+        updates.append("default_buying_price = %s")
+        params.append(body.buying_price)
 
     params.append(tid)
-    await db.execute(
-        f"UPDATE product_types SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE type_id = %s::uuid",
-        tuple(params)
+    updated = await db.execute(
+        f"UPDATE product_types SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE type_id = %s::uuid RETURNING type_id",
+        tuple(params),
     )
+    if not await updated.fetchone():
+        raise HTTPException(status_code=404, detail="Product not found")
 
     if body.selling_price is not None:
         new_sp = max(0.0, float(body.selling_price))
@@ -578,6 +507,11 @@ async def archive_product_endpoint(
     Prevents archiving if there is stock currently on hand.
     """
     tid = str(body.type_id)
+    locked = await db.execute("SELECT customer_id FROM customers WHERE customer_id = %s::uuid FOR UPDATE", (cid,))
+    if not await locked.fetchone():
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if body.action not in ("archive", "restore"):
+        raise HTTPException(status_code=400, detail="Invalid customer archive action")
     if body.action == "archive":
         st_res = await db.execute(
             "SELECT COALESCE(SUM(current_quantity), 0) AS total_stock FROM stock_batches WHERE type_id = %s::uuid AND current_quantity > 0",
@@ -617,7 +551,8 @@ async def create_sale_endpoint(
     4. Handles tender split (invoice payment vs old debt payment vs cash change).
     5. Returns exact accounting breakdown for receipts.
     """
-    op_key = body.operation_id or (idempotency_key if isinstance(idempotency_key, str) else None)
+    key = body.operation_id or (idempotency_key if isinstance(idempotency_key, str) else None)
+    op_key = f"sale:{current_user['user_id']}:{key}" if key else None
     if op_key:
         cached = await check_idempotency(db, op_key, body.model_dump_json())
         if cached:
@@ -625,33 +560,27 @@ async def create_sale_endpoint(
 
     user_id = current_user.get("user_id")
 
-    # Resolve Customer
-    customer_uuid = None
-    if body.customer_id:
-        chk = await db.execute("SELECT customer_id, balance FROM customers WHERE customer_id = %s::uuid AND is_active", (str(body.customer_id),))
-        c_row = await chk.fetchone()
-        if c_row:
-            customer_uuid = str(c_row["customer_id"])
-            current_cust_balance = float(c_row["balance"] or 0)
-
-    if not customer_uuid:
-        cust_res = await db.execute("SELECT customer_id, balance FROM customers WHERE is_active ORDER BY created_at LIMIT 1")
-        c_row = await cust_res.fetchone()
-        if c_row:
-            customer_uuid = str(c_row["customer_id"])
-            current_cust_balance = float(c_row["balance"] or 0)
-        else:
-            raise HTTPException(status_code=400, detail="No active customer found")
+    try:
+        customer_uuid = str(UUID(str(body.customer_id)))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Select a valid customer before saving the invoice")
+    chk = await db.execute(
+        "SELECT balance FROM customers WHERE customer_id = %s::uuid AND is_active FOR UPDATE", (customer_uuid,)
+    )
+    c_row = await chk.fetchone()
+    if not c_row:
+        raise HTTPException(status_code=400, detail="Selected customer is no longer active; choose a customer again")
+    current_cust_balance = Decimal(c_row["balance"] or 0)
 
     # Check for stale balance conflict
     if body.expected_previous_balance is not None:
-        if abs(float(body.expected_previous_balance) - current_cust_balance) > 0.01:
+        if Decimal(str(body.expected_previous_balance)) != current_cust_balance:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "error": "stale_balance",
                     "message": "Customer balance changed since review. Please confirm updated split.",
-                    "current_balance": current_cust_balance
+                    "current_balance": float(current_cust_balance)
                 }
             )
 
@@ -660,7 +589,7 @@ async def create_sale_endpoint(
     type_by_uuid = {str(r["type_id"]): r for r in all_types}
 
     db_items = []
-    calc_total = 0.0
+    calc_total = Decimal(0)
 
     for itm in body.items:
         chosen_type = None
@@ -673,69 +602,52 @@ async def create_sale_endpoint(
                     detail=f"Product with type_id {itm.type_id} is no longer available or inactive"
                 )
         elif itm.product_id:
-            p_str = str(itm.product_id).strip()
-            if p_str in type_by_uuid:
-                chosen_type = type_by_uuid[p_str]
-            else:
-                # Fallback search by type_name match
-                for t in all_types:
-                    if t["type_name"].lower() == p_str.lower():
-                        chosen_type = t
-                        break
+            chosen_type = type_by_uuid.get(str(itm.product_id).strip())
 
         if not chosen_type:
             raise HTTPException(status_code=400, detail="Invalid product item in invoice")
 
-        if chosen_type:
-            price = itm.price if (itm.price is not None and itm.price > 0) else float(chosen_type["default_selling_price"] or 0)
-            qty = max(1, itm.quantity)
-            item_entry = {
-                "type_id": str(chosen_type["type_id"]),
-                "quantity": qty,
-                "price": price
-            }
-            if itm.batch_id:
-                item_entry["batch_id"] = str(itm.batch_id)
-            db_items.append(item_entry)
-            calc_total += (price * qty)
+        price = Decimal(chosen_type["default_selling_price"] or 0)
+        if price <= 0:
+            raise HTTPException(status_code=400, detail=f"Set a selling price for {chosen_type['type_name']} before billing")
+        if itm.price is not None and Decimal(str(itm.price)) != price:
+            raise HTTPException(status_code=409, detail=f"Price changed for {chosen_type['type_name']}; refresh before confirming")
+        if itm.quantity <= 0:
+            raise HTTPException(status_code=400, detail="Invoice quantity must be positive")
+        if itm.batch_id and current_user.get("role") not in ("owner", "manager"):
+            raise HTTPException(status_code=403, detail="Batch override requires an owner or manager")
+        item_entry = {"type_id": str(chosen_type["type_id"]), "quantity": itm.quantity, "price": str(price)}
+        if itm.batch_id:
+            item_entry["batch_id"] = str(itm.batch_id)
+        db_items.append(item_entry)
+        calc_total += price * itm.quantity
 
     if not db_items:
         raise HTTPException(status_code=400, detail="No valid items in invoice")
 
-    discount = float(body.discount or 0.0)
-    final_total = max(0.0, calc_total - discount)
-
-    # Tender split logic
+    zero = Decimal(0)
+    discount = Decimal(str(body.discount or 0))
+    if not discount.is_finite() or not zero <= discount <= calc_total or discount != discount.quantize(Decimal("0.01")):
+        raise HTTPException(status_code=400, detail="Invalid discount")
+    final_total = calc_total - discount
     if body.payment_type == "credit":
-        invoice_amount_paid = 0.0
-        debt_payment = 0.0
-        cash_change = 0.0
-        total_cash_collected = 0.0
-        cash_received = 0.0
-    else:
-        # Cash or custom payment
-        cash_received = float(body.cash_received if body.cash_received is not None else (body.amount_paid if body.amount_paid is not None else final_total))
+        invoice_amount_paid = debt_payment = cash_change = cash_received = zero
+    elif body.payment_type in ("cash", "split", "custom"):
+        tender = body.cash_received if body.cash_received is not None else body.amount_paid
+        cash_received = Decimal(str(tender)) if tender is not None else final_total
+        if not cash_received.is_finite() or cash_received < 0 or cash_received != cash_received.quantize(Decimal("0.01")):
+            raise HTTPException(status_code=400, detail="Invalid cash amount")
         invoice_amount_paid = min(final_total, cash_received)
-        excess_cash = max(0.0, cash_received - final_total)
-
-        if excess_cash > 0 and current_cust_balance > 0:
-            if body.apply_to_old_debt is False:
-                # Seller selected: Give change instead
-                debt_payment = 0.0
-                cash_change = excess_cash
-            else:
-                # Default: Apply to old debt
-                max_debt_applicable = min(current_cust_balance, excess_cash)
-                if body.debt_payment_amount is not None:
-                    debt_payment = min(max_debt_applicable, float(body.debt_payment_amount))
-                else:
-                    debt_payment = max_debt_applicable
-                cash_change = excess_cash - debt_payment
-        else:
-            debt_payment = 0.0
-            cash_change = excess_cash
-
-        total_cash_collected = invoice_amount_paid + debt_payment
+        excess = cash_received - invoice_amount_paid
+        max_debt = min(max(zero, current_cust_balance), excess) if body.apply_to_old_debt else zero
+        desired = Decimal(str(body.debt_payment_amount)) if body.debt_payment_amount is not None else max_debt
+        if not desired.is_finite() or not zero <= desired <= max_debt or desired != desired.quantize(Decimal("0.01")):
+            raise HTTPException(status_code=400, detail="Invalid old-debt allocation")
+        debt_payment = desired
+        cash_change = excess - debt_payment
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported checkout payment mode")
+    total_cash_collected = invoice_amount_paid + debt_payment
 
     items_json = json.dumps(db_items)
 
@@ -749,9 +661,9 @@ async def create_sale_endpoint(
                 %s::jsonb,
                 %s::numeric,
                 %s::numeric,
-                NULL::uuid,
+                (SELECT method_id FROM payment_methods WHERE method_name = 'Cash'),
                 %s::text,
-                true
+                false
             )
             """,
             (user_id, customer_uuid, items_json, discount, invoice_amount_paid, body.notes or f"Invoice payment ({body.payment_type})")
@@ -762,9 +674,11 @@ async def create_sale_endpoint(
         # Fetch invoice number generated by sequence
         sale_info = await db.execute("SELECT sale_number FROM sales WHERE sale_id = %s::uuid", (sale_id,))
         s_row = await sale_info.fetchone()
-        invoice_number = s_row["sale_number"] if s_row else "INV-000001"
+        if not s_row:
+            raise RuntimeError("Saved invoice number was not returned")
+        invoice_number = s_row["sale_number"]
 
-        # If debt payment applies, post it linked to the same sale
+        # Post old debt collection separately from invoice payment
         debt_payment_id = None
         if debt_payment > 0:
             pay_res = await db.execute(
@@ -773,12 +687,12 @@ async def create_sale_endpoint(
                     %s::uuid,
                     %s::uuid,
                     %s::numeric,
+                    (SELECT method_id FROM payment_methods WHERE method_name = 'Cash'),
                     NULL::uuid,
-                    %s::uuid,
                     %s::text
                 )
                 """,
-                (user_id, customer_uuid, debt_payment, sale_id, f"Applied to prior debt during bill {invoice_number}")
+                (user_id, customer_uuid, debt_payment, f"Applied to prior debt during bill {invoice_number}")
             )
             p_row = await pay_res.fetchone()
             debt_payment_id = str(list(p_row.values())[0]) if p_row else None
@@ -807,6 +721,22 @@ async def create_sale_endpoint(
                     (user_id, customer_uuid, ret_type_id, qty, sale_id, f"Issued on bill {invoice_number}")
                 )
 
+        if body.empty_cans_returned:
+            ret_type = body.return_container_type_id
+            if not ret_type:
+                candidates = await db.execute(
+                    "SELECT type_id FROM customer_containers WHERE customer_id = %s::uuid AND held > 0 LIMIT 2",
+                    (customer_uuid,),
+                )
+                rows = await candidates.fetchall()
+                if len(rows) != 1:
+                    raise HTTPException(status_code=400, detail="Can't identify a single held can type. Leave checkout cans at zero and settle by type in Pay / Return.")
+                ret_type = rows[0]["type_id"]
+            await db.execute(
+                "SELECT record_container_movement(%s::uuid,%s::uuid,%s::uuid,0,%s,%s::uuid,%s)",
+                (user_id, customer_uuid, str(ret_type), body.empty_cans_returned, sale_id, f"Returned during bill {invoice_number}"),
+            )
+
         # Query updated container count for customer
         can_res = await db.execute(
             "SELECT COALESCE(SUM(held), 0) AS cans FROM customer_containers WHERE customer_id = %s::uuid",
@@ -819,6 +749,8 @@ async def create_sale_endpoint(
         bal_res = await db.execute("SELECT balance FROM customers WHERE customer_id = %s::uuid", (customer_uuid,))
         b_row = await bal_res.fetchone()
         final_balance = float(b_row["balance"] or 0)
+    except HTTPException:
+        raise
     except Exception as e:
         try:
             await db.rollback()
@@ -831,23 +763,35 @@ async def create_sale_endpoint(
         "sale_id": sale_id,
         "invoice_id": sale_id,
         "invoice_number": invoice_number,
-        "total": final_total,
-        "cash_received": cash_received,
-        "amount_paid": invoice_amount_paid,
-        "applied_to_bill": invoice_amount_paid,
-        "applied_to_old_debt": debt_payment,
+        "total": float(final_total),
+        "cash_received": float(cash_received),
+        "amount_paid": float(invoice_amount_paid),
+        "applied_to_bill": float(invoice_amount_paid),
+        "applied_to_old_debt": float(debt_payment),
         "debt_payment_id": debt_payment_id,
-        "change_returned": cash_change,
-        "previous_balance": current_cust_balance,
+        "change_returned": float(cash_change),
+        "previous_balance": float(current_cust_balance),
         "new_balance": final_balance,
         "new_cans_balance": final_cans,
-        "total_cash_collected": total_cash_collected,
+        "total_cash_collected": float(total_cash_collected),
         "message": f"Invoice {invoice_number} created successfully."
     }
+
+    receipt = await get_invoice_details(invoice_number, {"role": "employee"}, db)
+    receipt.update({
+        "cash_received": float(cash_received), "change_returned": float(cash_change),
+        "applied_to_old_debt": float(debt_payment), "debt_payment_id": debt_payment_id,
+        "previous_balance": float(current_cust_balance),
+        "customer_balance": final_balance, "current_customer_balance": final_balance,
+        "amount_paid": float(invoice_amount_paid), "applied_to_bill": float(invoice_amount_paid),
+    })
+    await db.execute("UPDATE sales SET receipt_snapshot = %s::jsonb WHERE sale_id = %s::uuid", (json.dumps(receipt), sale_id))
+    response_payload["receipt"] = receipt
 
     if op_key:
         await commit_idempotency(db, op_key, response_payload)
 
+    await db.commit()
     return response_payload
 
 
@@ -855,6 +799,7 @@ async def create_sale_endpoint(
 @router.get("/sales/list")
 async def list_invoices(
     q: Optional[str] = None,
+    date_filter: str = "all",
     limit: int = 100,
     offset: int = 0,
     current_user: dict = Depends(get_current_user),
@@ -877,9 +822,17 @@ async def list_invoices(
         FROM v_sales_list
     """
     params = []
+    filters = []
     if q and q.strip():
-        query += " WHERE customer_name ILIKE %s OR sale_number ILIKE %s"
+        filters.append("(customer_name ILIKE %s OR sale_number ILIKE %s)")
         params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
+    if date_filter in ("today", "yesterday"):
+        filters.append("sale_date = %s")
+        params.append(shop_today() - timedelta(days=int(date_filter == "yesterday")))
+    elif date_filter != "all":
+        raise HTTPException(status_code=400, detail="Invalid date filter")
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
 
     query += " ORDER BY sale_date DESC, sale_number DESC LIMIT %s OFFSET %s"
     params.extend([limit, offset])
@@ -940,6 +893,8 @@ async def get_invoice_details(
             s.sale_id,
             s.sale_number,
             s.sale_date,
+            s.created_at,
+            s.receipt_snapshot,
             s.total,
             s.subtotal,
             s.discount,
@@ -953,7 +908,7 @@ async def get_invoice_details(
         FROM sales s
         JOIN customers c ON c.customer_id = s.customer_id
         LEFT JOIN app_users u ON u.user_id = s.created_by
-        WHERE s.sale_number ILIKE %s OR s.sale_id::text = %s
+        WHERE lower(s.sale_number) = lower(%s) OR s.sale_id::text = %s
         LIMIT 1
         """,
         (clean_id, clean_id)
@@ -969,7 +924,7 @@ async def get_invoice_details(
             si.type_id,
             COALESCE(p.product_name, 'Drinking Water') AS product_name,
             COALESCE(pt.type_name, 'Standard') AS type_name,
-            pt.sku,
+            pt.sku, pt.tamil_name,
             COALESCE(pt.is_returnable_container, FALSE) AS is_returnable_container,
             u.unit_name,
             si.quantity,
@@ -1010,7 +965,7 @@ async def get_invoice_details(
         t_name = itm["type_name"]
         p_name = itm["product_name"]
         disp_name = t_name if p_name in ("Drinking Water", "General", "Product") or not p_name else f"{p_name} - {t_name}"
-        ta_name = tamil_names.get(t_name, tamil_names.get(disp_name, disp_name))
+        ta_name = itm["tamil_name"] or tamil_names.get(t_name, tamil_names.get(disp_name, disp_name))
 
         entry = {
             "sale_item_id": str(itm["sale_item_id"]),
@@ -1033,7 +988,7 @@ async def get_invoice_details(
 
     # Check for linked prior debt payments made at checkout
     debt_pay_res = await db.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS old_debt_amt FROM payments WHERE sale_id = %s::uuid AND notes ILIKE %s",
+        "SELECT COALESCE(SUM(amount), 0) AS old_debt_amt FROM payments WHERE sale_id = %s::uuid AND notes ILIKE %s AND voided_at IS NULL AND position('[VOIDED' in notes) = 0",
         (str(inv["sale_id"]), "%prior debt%")
     )
     dp_row = await debt_pay_res.fetchone()
@@ -1064,10 +1019,19 @@ async def get_invoice_details(
     else:
         historical_balance = max(0.0, float(inv["total"] or 0) - float(inv["amount_paid"] or 0))
 
+    if inv["receipt_snapshot"]:
+        receipt = dict(inv["receipt_snapshot"])
+        current_items = {item["sale_item_id"]: item for item in items}
+        receipt["items"] = [
+            {**item, "returned_quantity": current_items.get(item["sale_item_id"], {}).get("returned_quantity", 0)}
+            for item in receipt["items"]
+        ]
+        return {**receipt, "status": inv["status"]}
+
     return {
         "sale_id": str(inv["sale_id"]),
         "invoice_number": inv["sale_number"],
-        "date": str(inv["sale_date"]),
+        "date": inv["created_at"].isoformat(),
         "customer_name": inv["customer_name"],
         "customer_phone": inv["phone"] or "",
         "customer_address": inv["address"] or "",
@@ -1077,9 +1041,9 @@ async def get_invoice_details(
         "subtotal": float(inv["subtotal"] or inv["total"] or 0),
         "discount": float(inv["discount"] or 0),
         "total": float(inv["total"] or 0),
-        "amount_paid": float(inv["amount_paid"] or 0),
+        "amount_paid": max(0, float(inv["amount_paid"] or 0) - applied_to_old_debt),
         "applied_to_old_debt": applied_to_old_debt,
-        "balance_due": max(0.0, float(inv["total"] or 0) - float(inv["amount_paid"] or 0)),
+        "balance_due": max(0.0, float(inv["total"] or 0) - float(inv["amount_paid"] or 0) + applied_to_old_debt),
         "cans_returned": cans_returned,
         "status": inv["status"],
         "items": items
@@ -1102,14 +1066,19 @@ async def return_sale_item_endpoint(
     - Credits customer ledger balance.
     """
     user_id = current_user.get("user_id")
+    op_key = f"item_return:{user_id}:{body.operation_id}" if body.operation_id else None
+    if op_key:
+        cached = await check_idempotency(db, op_key, body.model_dump_json())
+        if cached:
+            return cached
     try:
         res = await db.execute(
-            "SELECT return_sale_item(%s::uuid, %s::uuid, %s::integer, %s::text)",
-            (user_id, body.sale_item_id, body.quantity, body.reason)
+            "SELECT return_sale_item(%s::uuid, %s::uuid, %s::integer, %s::text, %s::boolean)",
+            (user_id, body.sale_item_id, body.quantity, body.reason, body.restock)
         )
         row = await res.fetchone()
         return_id = str(list(row.values())[0]) if row else None
-        return {
+        response = {
             "status": "success",
             "return_id": return_id,
             "message": f"Successfully processed return of {body.quantity} item(s)."
@@ -1120,6 +1089,10 @@ async def return_sale_item_endpoint(
         except Exception:
             pass
         raise HTTPException(status_code=400, detail=str(e))
+    if op_key:
+        await commit_idempotency(db, op_key, response)
+    await db.commit()
+    return response
 
 
 @router.post("/sales/cancel")
@@ -1140,6 +1113,7 @@ async def cancel_sale_endpoint(
             "SELECT cancel_sale(%s::uuid, %s::uuid, %s::text)",
             (user_id, body.sale_id, body.reason)
         )
+        await db.commit()
         return {
             "status": "success",
             "message": "Bill cancelled successfully and stock restored."
@@ -1163,24 +1137,7 @@ async def receive_stock_endpoint(
 ):
     user_id = current_user.get("user_id")
 
-    type_id = None
-    if body.type_id:
-        chk = await db.execute("SELECT type_id, default_selling_price FROM product_types WHERE type_id = %s::uuid", (str(body.type_id),))
-        t_row = await chk.fetchone()
-        if t_row:
-            type_id = str(t_row["type_id"])
-
-    if not type_id and body.product_id:
-        all_types_res = await db.execute("SELECT type_id, type_name, default_selling_price FROM product_types WHERE is_active ORDER BY default_selling_price")
-        all_types = await all_types_res.fetchall()
-        p_str = str(body.product_id).strip().lower()
-        for idx, t in enumerate(all_types, start=1):
-            if str(idx) == p_str or p_str in t["type_name"].lower():
-                type_id = str(t["type_id"])
-                break
-
-    if not type_id:
-        raise HTTPException(status_code=400, detail="Product variant not found")
+    type_id = stock_type_id(body)
 
     supp_id = None
     if body.supplier_id:
@@ -1190,20 +1147,19 @@ async def receive_stock_endpoint(
             supp_id = str(s_row["supplier_id"])
 
     type_info = await db.execute("""
-        SELECT type_name, default_selling_price, 
-               CASE WHEN EXISTS (
-                   SELECT 1 FROM information_schema.columns WHERE table_name = 'product_types' AND column_name = 'default_buying_price'
-               ) THEN default_buying_price ELSE NULL END AS default_buying_price
-        FROM product_types WHERE type_id = %s::uuid
+        SELECT type_name, default_selling_price, default_buying_price
+        FROM product_types WHERE type_id = %s::uuid AND is_active FOR UPDATE
     """, (type_id,))
     t_row = await type_info.fetchone()
-    type_name = t_row["type_name"] if t_row else "item"
-    def_selling = float(t_row["default_selling_price"] or 0) if t_row else 20.0
+    if not t_row:
+        raise HTTPException(status_code=404, detail="Active product not found")
+    type_name = t_row["type_name"]
+    def_selling = float(t_row["default_selling_price"] or 0)
     def_buying = float(t_row["default_buying_price"]) if (t_row and t_row.get("default_buying_price") is not None) else None
 
     selling_price = float(body.selling_price) if body.selling_price is not None else def_selling
     if body.buying_price is not None:
-        buying_price = max(0.0, float(body.buying_price))
+        buying_price = float(body.buying_price)
     elif def_buying is not None:
         buying_price = def_buying
     else:
@@ -1211,7 +1167,9 @@ async def receive_stock_endpoint(
             status_code=400,
             detail="Buying cost is required when no default buying cost is set."
         )
-    qty = max(1, int(body.quantity))
+    qty = body.quantity
+    if qty <= 0 or not Decimal(str(buying_price)).is_finite() or buying_price < 0 or not Decimal(str(selling_price)).is_finite() or selling_price <= 0:
+        raise HTTPException(status_code=400, detail="Enter a positive stock quantity, positive selling price and valid buying cost")
 
     res = await db.execute(
         """
@@ -1237,6 +1195,7 @@ async def receive_stock_endpoint(
     st_row = await stock_res.fetchone()
     new_total = int(st_row["total_stock"] or 0)
 
+    await db.commit()
     return {
         "status": "success",
         "batch_id": batch_id,
@@ -1259,29 +1218,12 @@ async def adjust_stock_endpoint(
     """
     user_id = current_user.get("user_id")
 
-    type_id = None
-    if body.type_id:
-        chk = await db.execute("SELECT type_id FROM product_types WHERE type_id = %s::uuid", (str(body.type_id),))
-        t_row = await chk.fetchone()
-        if t_row:
-            type_id = str(t_row["type_id"])
-
-    if not type_id and body.product_id:
-        all_types_res = await db.execute("SELECT type_id, type_name FROM product_types WHERE is_active ORDER BY default_selling_price")
-        all_types = await all_types_res.fetchall()
-        p_str = str(body.product_id).strip().lower()
-        for idx, t in enumerate(all_types, start=1):
-            if str(idx) == p_str or p_str in t["type_name"].lower():
-                type_id = str(t["type_id"])
-                break
-
-    if not type_id:
-        raise HTTPException(status_code=400, detail="Product variant not found")
+    type_id = stock_type_id(body)
 
     # If specific batch specified, use it; otherwise pick active batch
     if body.batch_id:
         batch_res = await db.execute(
-            "SELECT batch_id, current_quantity FROM stock_batches WHERE batch_id = %s::uuid AND type_id = %s::uuid",
+            "SELECT batch_id, current_quantity FROM stock_batches WHERE batch_id = %s::uuid AND type_id = %s::uuid FOR UPDATE",
             (str(body.batch_id), type_id)
         )
     else:
@@ -1291,7 +1233,7 @@ async def adjust_stock_endpoint(
             FROM stock_batches 
             WHERE type_id = %s::uuid AND current_quantity > 0 
             ORDER BY received_date ASC, created_at ASC 
-            LIMIT 1
+            LIMIT 1 FOR UPDATE
             """,
             (type_id,)
         )
@@ -1303,11 +1245,13 @@ async def adjust_stock_endpoint(
     current_qty = int(b_row["current_quantity"] or 0)
 
     if body.delta is not None:
-        new_qty = max(0, current_qty + body.delta)
+        new_qty = current_qty + body.delta
     elif body.quantity is not None and body.quantity > 0:
-        new_qty = max(0, current_qty - abs(body.quantity))
+        new_qty = current_qty - body.quantity
     else:
-        new_qty = max(0, current_qty - 1)
+        raise HTTPException(status_code=400, detail="Enter a stock change")
+    if new_qty < 0:
+        raise HTTPException(status_code=400, detail="Stock change would make the batch negative")
 
     reason_type = body.reason_type if body.reason_type in ('adjustment', 'damaged', 'expired') else 'adjustment'
     reason = body.reason or ("Damaged goods write-off" if reason_type == 'damaged' else "Stock count correction")
@@ -1321,6 +1265,7 @@ async def adjust_stock_endpoint(
     st_row = await stock_res.fetchone()
     total_stock = int(st_row["total_stock"] or 0)
 
+    await db.commit()
     return {
         "status": "success",
         "batch_id": batch_id,
@@ -1524,6 +1469,12 @@ async def get_customer_details(
     r = await res.fetchone()
     if not r:
         raise HTTPException(status_code=404, detail="Customer not found")
+    containers = await db.execute("""
+        SELECT cc.type_id, pt.type_name AS name, pt.tamil_name AS ta, cc.held
+        FROM customer_containers cc JOIN product_types pt USING (type_id)
+        WHERE cc.customer_id = %s::uuid AND cc.held > 0
+        ORDER BY pt.type_name, cc.type_id
+    """, (customer_id,))
     return {
         "id": str(r["id"]),
         "name": r["name"],
@@ -1532,6 +1483,7 @@ async def get_customer_details(
         "credit_limit": float(r["credit_limit"] or 0),
         "balance": float(r["balance"] or 0),
         "cans": int(r["cans"] or 0),
+        "container_types": await containers.fetchall(),
         "is_active": bool(r["is_active"])
     }
 
@@ -1747,34 +1699,31 @@ async def receive_payment_endpoint(
     user_id = current_user.get("user_id")
     if not body.customer_id:
         raise HTTPException(status_code=400, detail="Customer ID is required")
-    if body.amount <= 0:
+    if not Decimal(str(body.amount)).is_finite() or body.amount <= 0:
         raise HTTPException(status_code=400, detail="Payment amount must be greater than zero")
 
     # Idempotency check
-    op_key = f"payment:{body.operation_id}" if body.operation_id else None
+    op_key = f"payment:{user_id}:{body.operation_id}" if body.operation_id else None
     if op_key:
-        cached = await check_idempotency(db, op_key, body.model_dump())
+        cached = await check_idempotency(db, op_key, body.model_dump_json())
         if cached:
             return cached
 
-    # Resolve payment_method to method_id
-    method_id = None
-    if body.payment_method:
-        m_str = body.payment_method.strip().lower()
-        m_map = {
-            "cash": "Cash",
-            "upi": "Bank Transfer",
-            "bank": "Bank Transfer",
-            "bank transfer": "Bank Transfer",
-            "cheque": "Cheque",
-            "check": "Cheque",
-            "card": "Card"
-        }
-        target_name = m_map.get(m_str, "Cash")
-        m_res = await db.execute("SELECT method_id FROM payment_methods WHERE method_name ILIKE %s LIMIT 1", (f"%{target_name}%",))
-        m_row = await m_res.fetchone()
-        if m_row:
-            method_id = str(m_row["method_id"])
+    customer_res = await db.execute("SELECT customer_id FROM customers WHERE customer_id = %s::uuid AND is_active FOR UPDATE", (str(body.customer_id),))
+    if not await customer_res.fetchone():
+        raise HTTPException(status_code=400, detail="Customer is not active")
+
+    # Only Cash and Bank Transfer can be entered as new settlements.
+    method = {"cash": "Cash", "bank": "Bank Transfer", "bank transfer": "Bank Transfer"}.get(
+        (body.payment_method or "cash").strip().lower()
+    )
+    if method is None:
+        raise HTTPException(status_code=400, detail="Choose Cash or Bank Transfer")
+    m_res = await db.execute("SELECT method_id FROM payment_methods WHERE method_name = %s AND is_active", (method,))
+    m_row = await m_res.fetchone()
+    if not m_row:
+        raise HTTPException(status_code=400, detail="Payment method is not active")
+    method_id = m_row["method_id"]
 
     try:
         res = await db.execute(
@@ -1801,17 +1750,18 @@ async def receive_payment_endpoint(
             "status": "success",
             "payment_id": payment_id,
             "new_balance": new_bal,
-            "message": f"Payment of ₹{body.amount} recorded. Customer balance is now ₹{new_bal:,.2f}"
+            "message": f"Payment of Rs. {body.amount} recorded. Customer balance is now Rs. {new_bal:,.2f}"
         }
-        if op_key:
-            await commit_idempotency(db, op_key, response_payload)
-        return response_payload
     except Exception as e:
         try:
             await db.rollback()
         except Exception:
             pass
         raise HTTPException(status_code=400, detail=str(e))
+    if op_key:
+        await commit_idempotency(db, op_key, response_payload)
+    await db.commit()
+    return response_payload
 
 
 @router.get("/payments/recent")
@@ -1824,6 +1774,7 @@ async def get_recent_payments(
         SELECT 
             p.payment_id,
             p.customer_id,
+            p.sale_id,
             c.customer_name,
             p.amount,
             p.payment_date,
@@ -1833,7 +1784,7 @@ async def get_recent_payments(
         FROM payments p
         JOIN customers c ON c.customer_id = p.customer_id
         LEFT JOIN payment_methods pm ON pm.method_id = p.method_id
-        WHERE (p.notes IS NULL OR position('[VOIDED' in p.notes) = 0)
+        WHERE p.voided_at IS NULL AND position('[VOIDED' in upper(COALESCE(p.notes,''))) = 0
     """
     params = []
     if customer_id and customer_id != "all":
@@ -1852,7 +1803,8 @@ async def get_recent_payments(
             "payment_date": str(r["payment_date"]),
             "created_at": str(r["created_at"]),
             "method": r["method_name"] or "Cash",
-            "notes": r["notes"] or ""
+            "notes": r["notes"] or "",
+            "can_correct": r["sale_id"] is None and not (r["notes"] or "").startswith("Applied to prior debt during bill")
         }
         for r in rows
     ]
@@ -1865,120 +1817,83 @@ async def correct_payment_endpoint(
     db: AsyncConnection = Depends(get_db)
 ):
     user_id = current_user.get("user_id")
-    p_res = await db.execute(
-        "SELECT payment_id, customer_id, amount, notes, method_id FROM payments WHERE payment_id = %s::uuid LIMIT 1",
-        (body.payment_id,)
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Enter a correction reason")
+    if not Decimal(str(body.new_amount)).is_finite() or body.new_amount <= 0:
+        raise HTTPException(status_code=400, detail="Enter a positive amount or use Void")
+    original = await lock_unvoided_payment(db, body.payment_id)
+    method_id = body.method_id or original["method_id"]
+    if body.payment_method:
+        name = body.payment_method.strip().lower()
+        aliases = {"bank": "bank transfer", "upi": "bank transfer", "check": "cheque"}
+        result = await db.execute("SELECT method_id FROM payment_methods WHERE lower(method_name) = %s", (aliases.get(name, name),))
+        method_row = await result.fetchone()
+        if not method_row:
+            raise HTTPException(status_code=400, detail="Unsupported payment method")
+        method_id = method_row["method_id"]
+    if Decimal(str(body.new_amount)) == original["amount"] and method_id == original["method_id"]:
+        raise HTTPException(status_code=400, detail="Nothing changed")
+    await reverse_account_payment(db, original, user_id, reason)
+    replacement = await db.execute(
+        "SELECT receive_payment(%s::uuid,%s::uuid,%s::numeric,%s::uuid,NULL::uuid,%s)",
+        (user_id, original["customer_id"], body.new_amount, method_id, f"Replacement for {body.payment_id}: {reason}"),
     )
-    p_row = await p_res.fetchone()
-    if not p_row:
-        raise HTTPException(status_code=404, detail="Payment record not found")
+    new_id = str((await replacement.fetchone())["receive_payment"])
+    balance = await db.execute("SELECT balance FROM customers WHERE customer_id = %s", (original["customer_id"],))
+    new_balance = float((await balance.fetchone())["balance"])
+    await db.commit()
+    return {"status": "success", "payment_id": new_id, "replaced_payment_id": body.payment_id,
+            "old_amount": float(original["amount"]), "new_amount": float(body.new_amount),
+            "new_balance": new_balance}
 
-    old_amount = float(p_row["amount"])
-    new_amount = float(body.new_amount)
-    if new_amount <= 0:
-        raise HTTPException(status_code=400, detail="Corrected amount must be greater than zero. Use Void to cancel.")
 
-    diff = new_amount - old_amount
-    customer_id = str(p_row["customer_id"])
-
-    # Update payments table
-    updates = ["amount = %s", "notes = COALESCE(notes, '') || ' [Corrected from ₹' || %s || ' to ₹' || %s || ']'"]
-    params = [new_amount, old_amount, new_amount]
-
-    if body.method_id:
-        updates.append("method_id = %s::uuid")
-        params.append(body.method_id)
-
-    params.append(body.payment_id)
-    await db.execute(f"UPDATE payments SET {', '.join(updates)} WHERE payment_id = %s::uuid", tuple(params))
-
-    # Delta adjustment in ledger
-    debit = abs(diff) if diff < 0 else 0
-    credit = diff if diff > 0 else 0
-    note = body.reason or f"Payment corrected from Rs. {old_amount} to Rs. {new_amount}"
-
-    ledger_res = await db.execute(
-        """
-        SELECT post_ledger(
-            %s::uuid,
-            'adjustment',
-            'payment',
-            %s::uuid,
-            %s::numeric,
-            %s::numeric,
-            %s::text,
-            %s::uuid
-        )
-        """,
-        (customer_id, body.payment_id, debit, credit, note, user_id)
+async def lock_unvoided_payment(db, payment_id):
+    try:
+        payment_id = UUID(str(payment_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payment ID")
+    res = await db.execute(
+        "SELECT payment_id, customer_id, amount, method_id, sale_id, notes, voided_at FROM payments WHERE payment_id = %s FOR UPDATE",
+        (payment_id,),
     )
-    l_row = await ledger_res.fetchone()
-    new_balance = float(list(l_row.values())[0]) if l_row else 0.0
+    row = await res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if row["voided_at"] or "[VOIDED" in (row["notes"] or "").upper():
+        raise HTTPException(status_code=409, detail="Payment is already reversed")
+    if row["sale_id"] or (row["notes"] or "").startswith("Applied to prior debt during bill"):
+        raise HTTPException(status_code=409, detail="Invoice-linked money needs the invoice reconciliation workflow")
+    return row
 
-    return {
-        "status": "success",
-        "payment_id": body.payment_id,
-        "old_amount": old_amount,
-        "new_amount": new_amount,
-        "new_balance": new_balance,
-        "message": f"Payment corrected from ₹{old_amount} to ₹{new_amount}. Balance updated."
-    }
+
+async def reverse_account_payment(db, row, user_id, reason):
+    active = await db.execute("SELECT customer_id FROM customers WHERE customer_id = %s AND is_active FOR UPDATE", (row["customer_id"],))
+    if not await active.fetchone():
+        raise HTTPException(status_code=409, detail="Restore the customer before reversing a payment")
+    res = await db.execute(
+        "SELECT post_ledger(%s::uuid,'adjustment','payment',%s::uuid,%s::numeric,0,%s,%s::uuid)",
+        (row["customer_id"], row["payment_id"], row["amount"], reason, user_id),
+    )
+    new_balance = float((await res.fetchone())["post_ledger"])
+    await db.execute("UPDATE payments SET voided_at = clock_timestamp() WHERE payment_id = %s", (row["payment_id"],))
+    await db.execute("SELECT log_activity(%s::uuid,'payment_reversed',%s,'payment',%s::uuid)", (user_id, reason, row["payment_id"]))
+    return new_balance
 
 
 @router.post("/payments/void")
 async def void_payment_endpoint(
     body: PaymentVoidRequest,
     current_user: dict = Depends(require_role("owner", "manager")),
-    db: AsyncConnection = Depends(get_db)
+    db: AsyncConnection = Depends(get_db),
 ):
-    """
-    Preserves audit history: does NOT hard delete.
-    Marks payment voided and offsets ledger balance.
-    """
-    user_id = current_user.get("user_id")
-    p_res = await db.execute(
-        "SELECT payment_id, customer_id, amount, notes FROM payments WHERE payment_id = %s::uuid LIMIT 1",
-        (body.payment_id,)
-    )
-    p_row = await p_res.fetchone()
-    if not p_row:
-        raise HTTPException(status_code=404, detail="Payment record not found")
-
-    old_amount = float(p_row["amount"])
-    customer_id = str(p_row["customer_id"])
-
-    # Reverse via ledger (debit = old_amount to restore debt balance)
-    ledger_res = await db.execute(
-        """
-        SELECT post_ledger(
-            %s::uuid,
-            'adjustment',
-            'payment',
-            %s::uuid,
-            %s::numeric,
-            0::numeric,
-            %s::text,
-            %s::uuid
-        )
-        """,
-        (customer_id, body.payment_id, old_amount, body.reason or f"Voided mistake payment of Rs. {old_amount}", user_id)
-    )
-    l_row = await ledger_res.fetchone()
-    new_balance = float(list(l_row.values())[0]) if l_row else 0.0
-
-    # Soft mark voided in notes (preserves database integrity without hard deletion)
-    await db.execute(
-        "UPDATE payments SET notes = COALESCE(notes, '') || ' [VOIDED: ' || %s || ']' WHERE payment_id = %s::uuid",
-        (body.reason or "Voided by manager", body.payment_id)
-    )
-
-    return {
-        "status": "success",
-        "payment_id": body.payment_id,
-        "voided_amount": old_amount,
-        "new_balance": new_balance,
-        "message": f"Payment of ₹{old_amount} voided successfully. Debt restored."
-    }
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Enter a void reason")
+    row = await lock_unvoided_payment(db, body.payment_id)
+    balance = await reverse_account_payment(db, row, current_user["user_id"], reason)
+    await db.commit()
+    return {"status": "success", "payment_id": body.payment_id, "voided_amount": float(row["amount"]), "new_balance": balance}
 
 
 @router.post("/containers/movement")
@@ -1994,22 +1909,38 @@ async def container_movement_endpoint(
     customer_uuid = str(body.customer_id)
 
     # Idempotency check
-    op_key = f"container:{body.operation_id}" if body.operation_id else None
+    op_key = f"container:{user_id}:{body.operation_id}" if body.operation_id else None
     if op_key:
-        cached = await check_idempotency(db, op_key, body.model_dump())
+        cached = await check_idempotency(db, op_key, body.model_dump_json())
         if cached:
             return cached
 
-    # Resolve returnable container type_id
+    if body.quantity <= 0 or body.action not in ("give", "return"):
+        raise HTTPException(status_code=400, detail="Enter a positive can quantity and valid movement")
     if body.type_id:
         type_uuid = str(body.type_id)
+    elif body.action == "return":
+        type_res = await db.execute(
+            "SELECT type_id FROM customer_containers WHERE customer_id = %s::uuid AND held > 0 LIMIT 2",
+            (customer_uuid,),
+        )
+        candidates = await type_res.fetchall()
+        if len(candidates) != 1:
+            raise HTTPException(status_code=400, detail="No single outstanding can type found; select the returnable type explicitly")
+        type_uuid = str(candidates[0]["type_id"])
     else:
-        type_res = await db.execute("SELECT type_id FROM product_types WHERE is_returnable_container LIMIT 1")
-        t_row = await type_res.fetchone()
-        type_uuid = str(t_row["type_id"]) if t_row else None
-
-    if not type_uuid:
-        raise HTTPException(status_code=400, detail="No returnable container product variant configured")
+        type_res = await db.execute("SELECT type_id FROM product_types WHERE is_active AND is_returnable_container LIMIT 2")
+        candidates = await type_res.fetchall()
+        if len(candidates) != 1:
+            raise HTTPException(status_code=400, detail="Select the returnable can type explicitly")
+        type_uuid = str(candidates[0]["type_id"])
+    customer_res = await db.execute("SELECT customer_id FROM customers WHERE customer_id = %s::uuid AND is_active FOR UPDATE", (customer_uuid,))
+    if not await customer_res.fetchone():
+        raise HTTPException(status_code=400, detail="Customer is not active")
+    if body.sale_id:
+        sale_res = await db.execute("SELECT sale_id FROM sales WHERE sale_id = %s::uuid AND customer_id = %s::uuid AND status = 'completed'", (str(body.sale_id), customer_uuid))
+        if not await sale_res.fetchone():
+            raise HTTPException(status_code=400, detail="Invoice does not belong to this customer or is not completed")
 
     p_given = body.quantity if body.action == "give" else 0
     p_returned = body.quantity if body.action != "give" else 0
@@ -2033,21 +1964,25 @@ async def container_movement_endpoint(
         row = await res.fetchone()
         new_held = list(row.values())[0] if row else 0
 
+        total_res = await db.execute("SELECT COALESCE(SUM(held), 0) AS total FROM customer_containers WHERE customer_id = %s::uuid", (customer_uuid,))
+        total_row = await total_res.fetchone()
         response_payload = {
             "status": "success",
-            "held": new_held,
-            "new_cans_balance": new_held,
+            "type_held": new_held,
+            "held": int(total_row["total"]),
+            "new_cans_balance": int(total_row["total"]),
             "message": f"Empty container movement recorded. Customer now holds {new_held} container(s)."
         }
-        if op_key:
-            await commit_idempotency(db, op_key, response_payload)
-        return response_payload
     except Exception as e:
         try:
             await db.rollback()
         except Exception:
             pass
         raise HTTPException(status_code=400, detail=str(e))
+    if op_key:
+        await commit_idempotency(db, op_key, response_payload)
+    await db.commit()
+    return response_payload
 
 
 # ============================================================
@@ -2063,175 +1998,89 @@ async def get_dashboard_today(
     Employees do NOT receive profit figures in the response.
     """
     role = current_user.get("role")
-
-    cash_res = await db.execute("SELECT COALESCE(SUM(amount), 0) AS cash FROM payments WHERE payment_date = CURRENT_DATE AND (notes IS NULL OR position('[VOIDED' in notes) = 0)")
-    cash_row = await cash_res.fetchone()
-    cash = float(cash_row["cash"] or 0)
-
-    sales_res = await db.execute("SELECT COALESCE(SUM(total), 0) AS sales FROM sales WHERE sale_date = CURRENT_DATE AND status != 'cancelled'")
-    sales_row = await sales_res.fetchone()
-    sales = float(sales_row["sales"] or 0)
-
-    debt_res = await db.execute("SELECT COALESCE(SUM(balance), 0) AS debt FROM customers WHERE is_active AND balance > 0")
-    debt_row = await debt_res.fetchone()
-    debt = float(debt_row["debt"] or 0)
-
-    cust_cnt_res = await db.execute("SELECT COUNT(*) AS cnt FROM customers WHERE is_active")
-    cust_cnt = await cust_cnt_res.fetchone()
-    customers = int(cust_cnt["cnt"] or 0)
-
-    low_stock_res = await db.execute(
-        """
-        SELECT COUNT(*) AS low_cnt FROM (
-            SELECT t.type_id, COALESCE(SUM(b.current_quantity), 0) as total_qty, t.low_stock_limit
-            FROM product_types t
-            LEFT JOIN stock_batches b ON b.type_id = t.type_id AND b.current_quantity > 0
-            WHERE t.is_active
-            GROUP BY t.type_id, t.low_stock_limit
-            HAVING COALESCE(SUM(b.current_quantity), 0) <= t.low_stock_limit
-        ) sub
-        """
-    )
-    low_row = await low_stock_res.fetchone()
-    low_stock = int(low_row["low_cnt"] or 0)
-
-    payload = {
-        "cash": cash,
-        "cash_inflow": cash,
-        "collections": cash,
-        "total_collections_today": cash,
-        "sales": sales,
-        "total_sales": sales,
-        "total_sales_today": sales,
-        "debt": debt,
-        "owed_to_you": debt,
-        "lowStock": low_stock,
-        "customers": customers,
+    day = shop_today()
+    totals = await report_totals(db, day, day)
+    rest = await db.execute("""
+        SELECT (SELECT COALESCE(SUM(balance),0) FROM customers WHERE balance > 0) AS debt,
+               (SELECT COUNT(*) FROM customers WHERE is_active) AS customers,
+               (SELECT COUNT(*) FROM v_stock_by_type WHERE low_stock) AS low_stock
+    """)
+    row = await rest.fetchone()
+    return {
+        "date": day.isoformat(), "sales": totals["net_sales"], "total_sales": totals["net_sales"],
+        "cash": totals["cash_collections"], "cash_inflow": totals["cash_collections"],
+        "total_collections_today": totals["collections"], "debt": float(row["debt"]),
+        "lowStock": row["low_stock"], "customers": row["customers"],
+        **({"profit": totals["gross_profit"], "profit_today": totals["gross_profit"]} if role in ("owner", "manager") else {}),
     }
 
-    # Gross profit strictly allowlisted to Owner and Manager
-    if role in ("owner", "manager"):
-        profit_res = await db.execute(
-            """
-            SELECT COALESCE(SUM(si.line_total - (si.buying_price * si.quantity)), 0) AS profit
-            FROM sale_items si
-            JOIN sales s ON s.sale_id = si.sale_id
-            WHERE s.sale_date = CURRENT_DATE AND s.status != 'cancelled'
-            """
-        )
-        profit_row = await profit_res.fetchone()
-        profit = float(profit_row["profit"] or 0)
-        payload["profit"] = profit
-        payload["profit_today"] = profit
-    else:
-        payload["profit"] = None
-        payload["profit_today"] = None
 
-    return payload
+def shop_zone() -> str:
+    return os.getenv("SHOP_TIMEZONE", "Asia/Colombo")
+
+
+def shop_today() -> date:
+    return datetime.now(ZoneInfo(shop_zone())).date()
+
+
+async def report_totals(db, start_date, end_date):
+    # Returns affect the date they are credited, not the original sale date.
+    # Legacy note-marked voids lack a timestamp; exclude them instead of fabricating a date.
+    result = await db.execute("""
+        WITH sold AS (
+            SELECT COALESCE(SUM(total),0) AS sales, COUNT(*) AS bills
+            FROM sales WHERE sale_date BETWEEN %(start)s AND %(end)s AND status = 'completed'
+        ), cost AS (
+            SELECT COALESCE(SUM(si.buying_price * si.quantity),0) AS cogs
+            FROM sale_items si JOIN sales s USING(sale_id)
+            WHERE s.sale_date BETWEEN %(start)s AND %(end)s AND s.status = 'completed'
+        ), returned AS (
+            SELECT COUNT(*) AS returns_count, COALESCE(SUM(credit_amount),0) AS returns_amount,
+                   COALESCE(SUM(cost_amount),0) AS restored_cost
+            FROM sale_returns WHERE timezone(%(zone)s, returned_at)::date BETWEEN %(start)s AND %(end)s
+        ), flow AS (
+            SELECT p.amount AS amount, m.method_name FROM payments p LEFT JOIN payment_methods m USING(method_id)
+            WHERE p.payment_date BETWEEN %(start)s AND %(end)s
+              AND position('[VOIDED' in upper(COALESCE(p.notes,''))) = 0
+            UNION ALL
+            SELECT -p.amount, m.method_name FROM payments p LEFT JOIN payment_methods m USING(method_id)
+            WHERE timezone(%(zone)s, p.voided_at)::date BETWEEN %(start)s AND %(end)s
+        ), collected AS (
+            SELECT COALESCE(SUM(amount),0) AS collections,
+                   COALESCE(SUM(amount) FILTER (WHERE method_name = 'Cash'),0) AS cash_collections
+            FROM flow
+        ), spent AS (
+            SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE expense_date BETWEEN %(start)s AND %(end)s
+        )
+        SELECT sales - returns_amount AS net_sales, cost.cogs - restored_cost AS cogs, bills,
+               returns_count, returns_amount, collections, cash_collections, expenses
+        FROM sold, cost, returned, collected, spent
+    """, {"start": start_date, "end": end_date, "zone": shop_zone()})
+    row = await result.fetchone()
+    gross = row["net_sales"] - row["cogs"]
+    return {**{k: float(v) for k, v in row.items()}, "bill_count": int(row["bills"]),
+            "gross_profit": float(gross), "net_profit": float(gross - row["expenses"])}
 
 
 @router.get("/reports/summary")
 @router.get("/reports/monthly")
 async def get_report_summary(
-    period: str = "this_month",  # "today", "this_week", "this_month", "custom"
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
+    period: str = "this_month", from_date: Optional[date] = None, to_date: Optional[date] = None,
     current_user: dict = Depends(require_role("owner", "manager")),
-    db: AsyncConnection = Depends(get_db)
+    db: AsyncConnection = Depends(get_db),
 ):
-    """
-    Computes authentic, reconciled financial report from actual ledger records.
-    Never returns hardcoded or fake numbers.
-    """
-    today = date.today()
+    today = shop_today()
+    end_date = today
     if period == "today":
         start_date = today
-        end_date = today
     elif period == "this_week":
-        # Monday as start of week
         start_date = today - timedelta(days=today.weekday())
-        end_date = today
     elif period == "this_month":
         start_date = today.replace(day=1)
-        end_date = today
-    elif period == "custom" and from_date and to_date:
-        start_date = date.fromisoformat(from_date)
-        end_date = date.fromisoformat(to_date)
+    elif period == "custom" and from_date and to_date and from_date <= to_date:
+        start_date, end_date = from_date, to_date
     else:
-        start_date = today.replace(day=1)
-        end_date = today
-
-    # 1. Total Sales and Bill Count
-    s_res = await db.execute(
-        """
-        SELECT 
-            COALESCE(SUM(total), 0) AS net_sales,
-            COUNT(*) AS bill_count
-        FROM sales 
-        WHERE sale_date BETWEEN %s AND %s AND status != 'cancelled'
-        """,
-        (start_date, end_date)
-    )
-    s_row = await s_res.fetchone()
-    sales = float(s_row["net_sales"] or 0)
-    bills = int(s_row["bill_count"] or 0)
-
-    # 2. Total Cash Collections
-    c_res = await db.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS collections FROM payments WHERE payment_date BETWEEN %s AND %s AND (notes IS NULL OR position('[VOIDED' in notes) = 0)",
-        (start_date, end_date)
-    )
-    c_row = await c_res.fetchone()
-    collections = float(c_row["collections"] or 0)
-
-    # 3. Cost of Goods Sold & Gross Profit
-    cogs_res = await db.execute(
-        """
-        SELECT 
-            COALESCE(SUM(si.buying_price * si.quantity), 0) AS total_cost
-        FROM sale_items si
-        JOIN sales s ON s.sale_id = si.sale_id
-        WHERE s.sale_date BETWEEN %s AND %s AND s.status != 'cancelled'
-        """,
-        (start_date, end_date)
-    )
-    cogs_row = await cogs_res.fetchone()
-    cogs = float(cogs_row["total_cost"] or 0)
-    gross_profit = max(0.0, sales - cogs)
-
-    # 4. Expenses
-    exp_res = await db.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS total_exp FROM expenses WHERE expense_date BETWEEN %s AND %s",
-        (start_date, end_date)
-    )
-    exp_row = await exp_res.fetchone()
-    expenses = float(exp_row["total_exp"] or 0)
-
-    # 5. Returns Count & Value
-    ret_res = await db.execute(
-        "SELECT COUNT(*) AS ret_count, COALESCE(SUM(credit_amount), 0) AS ret_val FROM sale_returns WHERE returned_at::date BETWEEN %s AND %s",
-        (start_date, end_date)
-    )
-    ret_row = await ret_res.fetchone()
-    returns_count = int(ret_row["ret_count"] or 0)
-    returns_val = float(ret_row["ret_val"] or 0)
-
-    net_profit = gross_profit - expenses
-
-    return {
-        "period": period,
-        "from_date": str(start_date),
-        "to_date": str(end_date),
-        "sales": sales,
-        "net_sales": sales,
-        "collections": collections,
-        "cogs": cogs,
-        "profit": gross_profit,
-        "gross_profit": gross_profit,
-        "expenses": expenses,
-        "net_profit": net_profit,
-        "bills": bills,
-        "bill_count": bills,
-        "returns_count": returns_count,
-        "returns_amount": returns_val
-    }
+        raise HTTPException(status_code=400, detail="Select a valid reporting period")
+    totals = await report_totals(db, start_date, end_date)
+    return {**totals, "period": period, "from_date": str(start_date), "to_date": str(end_date),
+            "sales": totals["net_sales"], "profit": totals["gross_profit"]}

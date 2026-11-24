@@ -22,6 +22,7 @@ node_modules/
 
 # Python virtual environments and cache
 venv/
+.venv/
 backend/venv/
 __pycache__/
 *.pyc

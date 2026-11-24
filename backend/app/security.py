@@ -12,11 +12,14 @@ from jose import JWTError, jwt         # For creating and reading JWT tokens
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer  # Reads the token from the request header
 from dotenv import load_dotenv
+from psycopg import AsyncConnection
+
+from app.database import get_db
 
 load_dotenv()
 
 # --- Settings (read from .env) ---
-SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 ALGORITHM = "HS256"                # The math algorithm used to sign the token
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
 
@@ -69,17 +72,18 @@ def decode_token(token: str) -> dict:
         raise credentials_exception
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    """
-    FastAPI calls this automatically when any endpoint uses Depends(get_current_user).
-    It reads the token from the request header, decodes it, and returns the user info.
-
-    Usage in a router:
-        async def my_endpoint(current_user = Depends(get_current_user)):
-            user_id = current_user["user_id"]
-            role = current_user["role"]
-    """
-    return decode_token(token)
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncConnection = Depends(get_db)) -> dict:
+    claims = decode_token(token)
+    result = await db.execute("""
+        SELECT u.user_role, u.full_name
+        FROM user_sessions s JOIN app_users u USING (user_id)
+        WHERE s.session_id::text = %s AND s.user_id::text = %s
+          AND s.signed_out_at IS NULL AND u.is_active
+    """, (claims.get("session_id"), claims.get("user_id")))
+    user = await result.fetchone()
+    if not user:
+        raise HTTPException(status_code=401, detail="Session ended. Please sign in again.")
+    return {**claims, "role": user["user_role"], "full_name": user["full_name"]}
 
 
 def require_role(*allowed_roles: str):
