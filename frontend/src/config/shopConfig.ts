@@ -14,8 +14,8 @@ export interface ShopConfig {
 }
 
 export const shopConfig: ShopConfig = {
-  name: import.meta.env.VITE_SHOP_NAME || "Namma Wholesale Distributors",
-  nameTa: import.meta.env.VITE_SHOP_NAME_TA || "நம்ம மொத்த வியாபாரம்",
+  name: import.meta.env.VITE_SHOP_NAME || "Wholesale Billing",
+  nameTa: import.meta.env.VITE_SHOP_NAME_TA || import.meta.env.VITE_SHOP_NAME || "மொத்த விற்பனை",
   tagline: import.meta.env.VITE_SHOP_TAGLINE || "Wholesale Billing & Inventory",
   taglineTa: import.meta.env.VITE_SHOP_TAGLINE_TA || "மொத்த விற்பனை & இருப்பு மேலாண்மை",
   address: import.meta.env.VITE_SHOP_ADDRESS || "",

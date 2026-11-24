@@ -32,7 +32,6 @@ export function Shell({
     { id: "customers", icon: "user", label: "customers" },
     { id: "payments", icon: "wallet", label: "payReturn" },
     { id: "reports", icon: "chart", label: "reports" },
-    { id: "settings", icon: "settings", label: "settings" },
   ];
 
   return (

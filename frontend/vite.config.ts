@@ -11,6 +11,11 @@ export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === "development";
 
+  const proxy = {
+    "^/(auth|products|customers|dashboard|reports|payments|containers|sales|invoices|stock|users|lists)(/|\\?|$)": {
+      target: process.env.BILLING_API_TARGET || "http://127.0.0.1:8000",
+    },
+  };
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : "/",
     build: {
@@ -32,6 +37,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      proxy,
+      allowedHosts: [".e2b.app"],
       host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
       port: parseInt(process.env.PORT || "8443"),
       strictPort: true,
@@ -40,6 +47,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: {
+      proxy,
+      allowedHosts: [".e2b.app"],
       host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",
       port: parseInt(process.env.PORT || "8443"),
     },

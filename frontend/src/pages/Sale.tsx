@@ -1,18 +1,23 @@
 import { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
-import { api } from "../services/api";
+import { api, ApiError } from "../services/api";
 import type { Customer, CreatedInvoice, IconName, Product } from "../types";
-import { sampleCustomers, classifyProductRank } from "../data/sampleData";
+import { classifyProductRank } from "../data/sampleData";
 import { Icon } from "../components/Icon";
 import { Stepper } from "../components/Stepper";
 import { AddCustomerModal } from "../components/modals/AddCustomerModal";
 import { PrintInvoiceModal } from "../components/modals/PrintInvoiceModal";
 import { formatMoney } from "../utils/formatters";
 
+import { hasPendingOperation, retryOperation, submitOnce } from "../services/operations";
+import { toInvoice } from "../utils/receipt";
+
+const noCustomer: Customer = { id: "", name: "", phone: "", balance: 0, cans: 0 };
+
 export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void }) {
   const { t, lang, speak, showToast } = useApp();
   const [step, setStep] = useState(1);
-  const [customer, setCustomer] = useState(sampleCustomers[0]);
+  const [customer, setCustomer] = useState(noCustomer);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [editingQty, setEditingQty] = useState<Record<string, string>>({});
@@ -21,26 +26,20 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   const [loadingProducts, setLoadingProducts] = useState<boolean>(true);
   const [productsError, setProductsError] = useState<string | null>(null);
   const lastStockReqIdRef = useRef<number>(0);
-  const [customers, setCustomers] = useState<Customer[]>(sampleCustomers);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [payMode, setPayMode] = useState<"cash" | "credit" | "custom">("cash");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [cashManuallyOverridden, setCashManuallyOverridden] = useState<boolean>(false);
+  const [discountInput, setDiscountInput] = useState("");
   const [applyToOldDebt, setApplyToOldDebt] = useState<boolean>(true);
-  const [operationId, setOperationId] = useState<string>(() => "OP-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7));
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [canWarning, setCanWarning] = useState<string | null>(null);
+  const [returnCanType, setReturnCanType] = useState("");
+  const [heldTypes, setHeldTypes] = useState<NonNullable<Customer["container_types"]>>([]);
   const [cansReturning, setCansReturning] = useState<string>("");
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [createdInvoice, setCreatedInvoice] = useState<CreatedInvoice | null>(null);
-  const [failedCanReturn, setFailedCanReturn] = useState<{
-    customerId: string | number;
-    quantity: number;
-    saleId?: string;
-    invNumber: string;
-  } | null>(null);
-  const [retryingCan, setRetryingCan] = useState(false);
-
-  // Helper for stable product identity - strictly type_id only, no row-number fallback
+  const checkoutInFlight = useRef(false);
+  const [customerError, setCustomerError] = useState(false);
   const getProductKey = (p: Product) => (p.type_id ? String(p.type_id) : "");
 
   // Active products set & missing cart items detection
@@ -48,14 +47,20 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   const missingCartEntries = Object.entries(cart).filter(([key, qty]) => qty > 0 && !activeTypeIds.has(key));
   const hasMissingCartItems = missingCartEntries.length > 0;
 
-  const total = products.reduce((sum, p) => {
+  const subtotalCents = products.reduce((sum, p) => {
     const key = getProductKey(p);
-    return key ? sum + p.price * (cart[key] || 0) : sum;
+    return key ? sum + Math.round(p.price * 100) * (cart[key] || 0) : sum;
   }, 0);
+
+  const subtotal = subtotalCents / 100;
+  const discount = Number(discountInput) || 0;
+  const discountCents = Math.round(discount * 100);
+  const invalidDiscount = !/^\d*(?:\.\d{0,2})?$/.test(discountInput) || discountCents > subtotalCents;
+  const total = (subtotalCents - (invalidDiscount ? 0 : discountCents)) / 100;
 
   // Sync cashReceived with current invoice total when cash mode active and not overridden
   useEffect(() => {
-    if (payMode === "cash" && !cashManuallyOverridden) {
+    if (payMode !== "credit" && !cashManuallyOverridden) {
       setCashReceived(String(total));
     }
   }, [total, payMode, cashManuallyOverridden]);
@@ -97,23 +102,15 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
         setLoadingProducts(false);
       });
 
-    api
-      .get<{ customers?: Partial<Customer>[] } | Partial<Customer>[]>("/customers/list", token)
-      .then((result) => {
-        const rows = Array.isArray(result) ? result : (result.customers ?? []);
-        if (rows.length) {
-          const mapped = rows.map((row, index) => ({
-            ...sampleCustomers[index % sampleCustomers.length],
-            ...row,
-            id: row.id ? String(row.id) : index + 1,
-            balance: Number(row.balance ?? 0),
-            cans: Number(row.cans ?? 0),
-          }));
-          setCustomers(mapped);
-          setCustomer((curr) => mapped.find((m) => String(m.id) === String(curr.id)) || mapped[0]);
-        }
+    setCustomerError(false);
+    api.get<Customer[]>(`/customers/list?q=${encodeURIComponent(query)}`, token)
+      .then((rows) => {
+        if (reqId !== lastStockReqIdRef.current) return;
+        setCustomers(rows);
+        setCustomer((curr) => rows.find((row) => row.id === curr.id) || curr);
       })
-      .catch(() => {});
+      .catch(() => { if (reqId === lastStockReqIdRef.current) setCustomerError(true); });
+
   };
 
   useEffect(() => {
@@ -127,51 +124,14 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
       window.removeEventListener("refresh-customer-data", handleRefresh);
       window.removeEventListener("refresh-stock-data", handleRefresh);
     };
-  }, [token]);
+  }, [token, query]);
 
-  const retryCanReturn = async () => {
-    if (!failedCanReturn) return;
-    setRetryingCan(true);
-    try {
-      const moveRes = await api.post<any>(
-        "/containers/movement",
-        {
-          customer_id: failedCanReturn.customerId,
-          quantity: failedCanReturn.quantity,
-          action: "return",
-          sale_id: failedCanReturn.saleId,
-          notes: `Returned during invoice ${failedCanReturn.invNumber}`,
-        },
-        token,
-      );
-      showToast(
-        lang === "ta"
-          ? `${failedCanReturn.quantity} காலிகேன்கள் வெற்றிகரமாக வரவு வைக்கப்பட்டது!`
-          : `Successfully recorded ${failedCanReturn.quantity} returned cans!`,
-        "success"
-      );
-      setCanWarning(null);
-      setFailedCanReturn(null);
-      if (moveRes && (moveRes.held !== undefined || moveRes.new_cans_balance !== undefined)) {
-        const updatedCans = Number(moveRes.held ?? moveRes.new_cans_balance);
-        setCustomer((prev) => ({ ...prev, cans: updatedCans }));
-      }
-      window.dispatchEvent(new CustomEvent("refresh-customer-data"));
-      window.dispatchEvent(new CustomEvent("refresh-stock-data"));
-      loadData();
-    } catch (err: any) {
-      showToast(
-        lang === "ta"
-          ? `மீண்டும் தோல்வியடைந்தது: ${err.message || "பிழை"}`
-          : `Retry failed: ${err.message || "Error"}`,
-        "error"
-      );
-    } finally {
-      setRetryingCan(false);
-    }
-  };
+  useEffect(() => {
+    if (!query) { loadData(); return; }
+    const timer = setTimeout(loadData, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-  // Quantity input handling: allows temporarily blank, validates on change and commit
   const handleQuantityChange = (prod: Product, val: string) => {
     const key = getProductKey(prod);
     if (!key) {
@@ -248,13 +208,14 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
     setEditingQty((prev) => ({ ...prev, [key]: String(nextVal) }));
   };
 
+  const invalidCash = payMode !== "credit" && !/^\d*(?:\.\d{0,2})?$/.test(cashReceived);
   const numCashReceived = payMode === "credit" ? 0 : (Number(cashReceived) || 0);
   const appliedToBill = Math.min(total, numCashReceived);
   const excessCash = Math.max(0, numCashReceived - total);
   const previousDebt = Math.max(0, customer.balance);
   const appliedToDebt = (applyToOldDebt && excessCash > 0 && previousDebt > 0) ? Math.min(previousDebt, excessCash) : 0;
   const changeReturned = (applyToOldDebt && excessCash > 0 && previousDebt > 0) ? (excessCash - appliedToDebt) : excessCash;
-  const newBalance = previousDebt + (total - appliedToBill) - appliedToDebt;
+  const newBalance = customer.balance + (total - appliedToBill) - appliedToDebt;
   const numCansReturn = Number(cansReturning) || 0;
   const filledCansGiven = products.reduce((sum, p) => {
     if (p.is_returnable) {
@@ -265,17 +226,42 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
   const cansAlreadyWithCustomer = customer.cans || 0;
   const cansAfterSale = cansAlreadyWithCustomer + filledCansGiven - numCansReturn;
 
-  const saveInvoice = async () => {
-    if (hasMissingCartItems) {
+  useEffect(() => {
+    setHeldTypes([]);
+    setReturnCanType("");
+    if (!customer.id) return;
+    let current = true;
+    api.get<Customer>(`/customers/details/${customer.id}`, token)
+      .then((row) => { if (current) setHeldTypes(row.container_types || []); })
+      .catch(() => {});
+    return () => { current = false; };
+  }, [customer.id, customer.cans, token]);
+
+  const canOptions = new Map(heldTypes.map((row) => [row.type_id, row]));
+  for (const p of products) {
+    const type_id = getProductKey(p);
+    const quantity = cart[type_id] || 0;
+    if (p.is_returnable && quantity > 0) {
+      canOptions.set(type_id, { type_id, name: p.name, ta: p.ta, held: (canOptions.get(type_id)?.held || 0) + quantity });
+    }
+  }
+  const selectedCanType = canOptions.size === 1 ? canOptions.keys().next().value : returnCanType;
+  const invalidCans = !Number.isInteger(numCansReturn) || numCansReturn < 0 ||
+    (numCansReturn > 0 && (!selectedCanType || numCansReturn > (canOptions.get(selectedCanType)?.held ?? 0)));
+  const pendingCheckout = hasPendingOperation("/sales/create", token);
+
+  const saveInvoice = async (retry = false) => {
+    if (checkoutInFlight.current || (!retry && (!customer.id || invalidCans || invalidCash || invalidDiscount))) return;
+    if (!retry && hasMissingCartItems) {
       setCheckoutError(lang === "ta"
         ? "கிடைக்காத பொருட்கள் வரைவில் உள்ளன. தொடர்வதற்கு அவற்றை நீக்கவும்."
         : "Some items in your draft are no longer available in the catalog. Please remove them before saving.");
       return;
     }
 
+    checkoutInFlight.current = true;
     setSaving(true);
     setCheckoutError(null);
-    setCanWarning(null);
     try {
       const saleItems = Object.entries(cart)
         .filter(([, q]) => q > 0)
@@ -292,120 +278,58 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
           };
         });
 
-      const res = await api.post<any>(
+      const res = retry ? await retryOperation<any>("/sales/create", token) : await submitOnce<any>(
         "/sales/create",
         {
-          operation_id: operationId,
           customer_id: customer.id,
           items: saleItems,
           payment_type: payMode,
+          discount: discountCents / 100,
           cash_received: numCashReceived,
           amount_paid: appliedToBill,
           apply_to_old_debt: applyToOldDebt,
           expected_previous_balance: customer.balance,
+          empty_cans_returned: numCansReturn,
+          ...(numCansReturn > 0 ? { return_container_type_id: selectedCanType } : {}),
         },
         token,
       );
 
-      let canSuccess = true;
-      let finalCansBalance = res.new_cans_balance;
-      if (numCansReturn > 0) {
-        try {
-          const moveRes = await api.post<any>(
-            "/containers/movement",
-            {
-              customer_id: customer.id,
-              quantity: numCansReturn,
-              action: "return",
-              sale_id: res.sale_id,
-              notes: `Returned during invoice ${res.invoice_number}`,
-            },
-            token,
-          );
-          if (moveRes && (moveRes.held !== undefined || moveRes.new_cans_balance !== undefined)) {
-            finalCansBalance = Number(moveRes.held ?? moveRes.new_cans_balance);
-          } else {
-            finalCansBalance = Math.max(0, (res.new_cans_balance ?? cansAlreadyWithCustomer) - numCansReturn);
-          }
-          setFailedCanReturn(null);
-        } catch (canErr: any) {
-          canSuccess = false;
-          setFailedCanReturn({
-            customerId: customer.id,
-            quantity: numCansReturn,
-            saleId: res.sale_id,
-            invNumber: res.invoice_number,
-          });
-          setCanWarning(lang === "ta"
-            ? `இன்வாய்ஸ் ${res.invoice_number} உருவானது. ஆனால் காலிகேன் வரவு (${numCansReturn}) பதிவாகவில்லை (${canErr.message || "பிழை"}). தயவுசெய்து கீழே மீண்டும் முயற்சிக்கவும்.`
-            : `Invoice ${res.invoice_number} saved, but empty can return (${numCansReturn}) failed (${canErr.message || "network error"}). Please retry below.`);
-        }
-      }
-
-      const invNumber = res.invoice_number || `INV-${String(Date.now()).slice(-6)}`;
+      const invoice = toInvoice(res.receipt);
       speak("Invoice saved and stock updated", "இன்வாய்ஸ் சேமிக்கப்பட்டு சரக்கு குறைக்கப்பட்டது");
-      showToast(
-        lang === "ta" ? `இன்வாய்ஸ் ${invNumber} வெற்றிகரமாக சேமிக்கப்பட்டது!` : `Invoice ${invNumber} saved successfully!`,
-        "success"
-      );
-
-      setCreatedInvoice({
-        invoice_number: invNumber,
-        customer_name: customer.name,
-        customer_phone: customer.phone,
-        customer_address: customer.address,
-        customer_balance: res.new_balance,
-        previous_balance: customer.balance,
-        items: saleItems.map((si) => {
-          const prod = products.find((p) => getProductKey(p) === (si.type_id ? String(si.type_id) : String(si.product_id)));
-          return {
-            id: prod?.id || si.product_id || 1,
-            name: si.name,
-            variant: prod && prod.name !== si.name ? prod.name : "",
-            unit: prod?.unit || (prod?.is_returnable ? "can" : "bottle"),
-            ta: si.ta,
-            quantity: si.quantity,
-            price: si.price,
-            subtotal: si.subtotal,
-          };
-        }),
-        subtotal: total,
-        amount_paid: res.applied_to_bill,
-        cash_received: res.cash_received,
-        applied_to_bill: res.applied_to_bill,
-        applied_to_old_debt: res.applied_to_old_debt,
-        change_returned: res.change_returned,
-        balance_due: Math.max(0, total - res.applied_to_bill),
-        cans_returned: canSuccess ? numCansReturn : 0,
-        staff_name: "Cashier",
-        date: new Date().toISOString(),
-      });
+      showToast(lang === "ta" ? `இன்வாய்ஸ் ${invoice.invoice_number} சேமிக்கப்பட்டது!` : `Invoice ${invoice.invoice_number} saved.`, "success");
+      setCreatedInvoice(invoice);
 
       setCart({});
+      setDiscountInput("");
+      setPayMode("cash");
+      setApplyToOldDebt(true);
       setEditingQty({});
       setCansReturning("");
       setCashReceived("");
       setCashManuallyOverridden(false);
-      setOperationId("OP-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7));
-      if (finalCansBalance !== undefined) {
-        setCustomer((prev) => ({ ...prev, balance: res.new_balance, cans: finalCansBalance }));
+      if (res.new_cans_balance !== undefined) {
+        setCustomer((prev) => ({ ...prev, balance: res.new_balance, cans: res.new_cans_balance }));
       }
       loadData();
       window.dispatchEvent(new CustomEvent("refresh-customer-data"));
       window.dispatchEvent(new CustomEvent("refresh-stock-data"));
     } catch (err: any) {
-      if (err.message && err.message.includes("stale_balance")) {
+      if (err instanceof ApiError && err.code === "stale_balance") {
         setCheckoutError(lang === "ta"
           ? "வாடிக்கையாளரின் கடன் தொகை மாறியுள்ளது. புதிய தொகையை சரிபார்க்கவும்."
           : "Customer balance changed while reviewing. Please verify the updated numbers.");
         loadData();
+      } else if (err instanceof ApiError && err.status < 500) {
+        setCheckoutError(err.message);
       } else {
         setCheckoutError(lang === "ta"
           ? "இன்வாய்ஸ் சேமிக்கப்பட்டதா என சோதிக்கவும். மீண்டும் உடனடியாக தட்ட வேண்டாம்."
-          : "Could not confirm whether invoice saved. Check recent invoices before trying again.");
+          : "Could not confirm the invoice. Use “Retry the same bill” above.");
       }
       speak("Invoice not confirmed", "இன்வாய்ஸ் உறுதி செய்யப்படவில்லை");
     } finally {
+      checkoutInFlight.current = false;
       setSaving(false);
     }
   };
@@ -419,6 +343,14 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
 
   return (
     <div className="workflow-page sale-page">
+      {pendingCheckout && !createdInvoice && (
+        <div className="workflow-card" role="status">
+          <p>{lang === "ta" ? "முந்தைய பில் உறுதி செய்யப்படவில்லை." : "The previous bill is not confirmed."}</p>
+          <button type="button" className="primary-action" disabled={saving} onClick={() => saveInvoice(true)}>
+            {lang === "ta" ? "அதே பில்லை மீண்டும் முயற்சி செய்" : "Retry the same bill"}
+          </button>
+        </div>
+      )}
       {/* Sub-bar below navbar */}
       <div className="subbar-nav">
         <button
@@ -431,28 +363,10 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
         </button>
 
         <div className="subbar-center">
-          <Stepper
-            steps={[t("customer"), t("items"), t("payment")]}
-            current={step}
-            onSelect={(s) => setStep(s)}
-          />
+          <Stepper step={step} />
         </div>
 
-        <div className="subbar-right">
-          <span className="live-total">
-            <small>{t("total")}</small>
-            <b>{formatMoney(total)}</b>
-          </span>
-          <button
-            className="btn-next-inline"
-            disabled={(step === 1 && !customer) || (step === 2 && (!total || hasMissingCartItems))}
-            onClick={() => {
-              if (step < 3) setStep(step + 1);
-            }}
-          >
-            {step === 3 ? t("done") : t("next")} →
-          </button>
-        </div>
+        <div className="subbar-right" />
       </div>
 
       {/* STEP 1: Select Customer (Highlights customer and does not auto-advance) */}
@@ -482,6 +396,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
             </div>
 
             <div className="choice-list inside-scroll">
+              {customerError && <p role="alert">{lang === "ta" ? "வாடிக்கையாளர்களை ஏற்ற முடியவில்லை" : "Could not load customers"}</p>}
               {customers
                 .filter(
                   (c) =>
@@ -517,7 +432,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
 
           {/* Right: Selected Customer Card with explicit "Start adding items" button */}
           <div className="selected-customer-preview workflow-card">
-            {customer ? (
+            {customer.id ? (
               <div style={{ display: "flex", flexDirection: "column", height: "100%", textAlign: "left" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
                   <div className="large-avatar" style={{ margin: 0 }}>
@@ -905,13 +820,13 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
             <div className="live-cart-footer">
               <div className="cart-total-bar">
                 <span>{t("total")}</span>
-                <b>{formatMoney(total)}</b>
+                <b>{formatMoney(subtotal)}</b>
               </div>
               <div className="cart-actions-row">
                 <button className="back-step-btn" onClick={() => setStep(1)}>
                   ← {t("back")}
                 </button>
-                <button className="next-step-btn" disabled={!total || hasMissingCartItems} onClick={() => setStep(3)}>
+                <button className="next-step-btn" disabled={!subtotal || hasMissingCartItems} onClick={() => setStep(3)}>
                   {t("next")} →
                 </button>
               </div>
@@ -1004,11 +919,17 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
               })}
             </div>
 
+            <label className="large-cash-box" style={{marginBottom: 10}}>
+              <span>{lang === "ta" ? "தள்ளுபடி (Rs.)" : "Discount (Rs.)"}</span>
+              <input type="number" min="0" max={subtotal} step="0.01" value={discountInput}
+                onChange={(e) => setDiscountInput(e.target.value)} placeholder="0" />
+            </label>
+            {invalidDiscount && <p role="alert">{lang === "ta" ? "தள்ளுபடியை சரிபார்க்கவும்." : "Enter a discount no greater than the subtotal."}</p>}
             {/* Customer Outstanding Credit & Today's Invoice Breakdown */}
             <div className="kadan-breakdown-box">
               <div className="breakdown-row">
-                <span>{lang === "ta" ? "பழைய கடன் (Pending Debt)" : "Previous Debt"}</span>
-                <b>{formatMoney(Math.max(0, customer.balance))}</b>
+                <span>{customer.balance < 0 ? (lang === "ta" ? "முந்தைய வரவு" : "Previous Credit") : (lang === "ta" ? "பழைய கடன்" : "Previous Debt")}</span>
+                <b>{formatMoney(Math.abs(customer.balance))}</b>
               </div>
               <div className="breakdown-row highlight">
                 <span>{lang === "ta" ? "இன்றைய இன்வாய்ஸ் (Today's Invoice)" : "Today's Invoice Total"}</span>
@@ -1053,6 +974,16 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                 </div>
               </div>
 
+              {numCansReturn > 0 && canOptions.size > 1 && (
+                <label>
+                  {lang === "ta" ? "கேன் வகை" : "Can type"}
+                  <select value={returnCanType} onChange={(e) => setReturnCanType(e.target.value)}>
+                    <option value="">{lang === "ta" ? "வகையைத் தேர்ந்தெடு" : "Choose type"}</option>
+                    {[...canOptions.values()].map((row) => <option key={row.type_id} value={row.type_id}>{lang === "ta" ? row.ta || row.name : row.name} ({row.held})</option>)}
+                  </select>
+                </label>
+              )}
+              {invalidCans && <p role="alert">{lang === "ta" ? "கேன் வகையையும் எண்ணிக்கையையும் சரிபார்க்கவும்." : "Check the can type and quantity."}</p>}
               {/* 4-Line Can Balance Specification */}
               <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "10px 12px", fontSize: 13, display: "grid", gap: 6, border: "1px solid #e2e8f0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", color: "#475569" }}>
@@ -1167,7 +1098,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                   <input
                     type="number"
                     min="0"
-                    step="1"
+                    step="0.01"
                     value={cashReceived}
                     onChange={(e) => {
                       setCashReceived(e.target.value);
@@ -1229,7 +1160,7 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
 
             <div className="resulting-balance-banner" style={{ marginTop: "auto", marginBottom: 14 }}>
               <span>{lang === "ta" ? "பில்லுக்குப் பின் மொத்த கடன்:" : "Total Debt After Bill:"}</span>
-              <b style={{ color: newBalance > 0 ? "#b45309" : "#15803d" }}>{formatMoney(Math.max(0, newBalance))}</b>
+              <b style={{ color: newBalance > 0 ? "#b45309" : "#15803d" }}>{formatMoney(newBalance)}</b>
             </div>
 
             {checkoutError && (
@@ -1246,46 +1177,18 @@ export function Sale({ token, onGoHome }: { token: string; onGoHome: () => void 
                     setCheckoutError(null);
                   }}
                 >
-                  {lang === "ta" ? "கணக்கை சரிபார்த்து புதுப்பிக்கவும்" : "Check whether it saved & refresh"}
+                  {lang === "ta" ? "கணக்கை சரிபார்த்து புதுப்பிக்கவும்" : "Refresh invoice details"}
                 </button>
               </div>
             )}
 
-            {canWarning && (
-              <div style={{ marginBottom: 12, padding: 12, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, color: "#b45309" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Icon name="warning" size={18} />
-                    <span>{canWarning}</span>
-                  </div>
-                  {failedCanReturn && (
-                    <button
-                      type="button"
-                      onClick={retryCanReturn}
-                      disabled={retryingCan}
-                      style={{
-                        padding: "6px 12px",
-                        background: "#d97706",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: 6,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        fontSize: 12,
-                      }}
-                    >
-                      {retryingCan ? "..." : (lang === "ta" ? "காலிகேன்களை மட்டும் மீண்டும் சேமிக்கவும்" : "Retry Empty Cans Return")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+
 
             <div className="summary-actions">
               <button className="back-step-btn" onClick={() => setStep(2)}>
                 ← {t("back")}
               </button>
-              <button className="primary-action" disabled={saving || !total || hasMissingCartItems} onClick={saveInvoice}>
+              <button className="primary-action" style={{width: "100%"}} disabled={saving || pendingCheckout || invalidCans || invalidCash || invalidDiscount || !subtotal || hasMissingCartItems} onClick={() => saveInvoice()}>
                 <Icon name="check" size={22} />
                 {saving ? "..." : `${t("saveBill")} (${formatMoney(total)})`}
               </button>

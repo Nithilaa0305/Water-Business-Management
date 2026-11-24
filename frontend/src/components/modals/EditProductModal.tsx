@@ -82,6 +82,7 @@ export function EditProductModal({
       const payload: Record<string, any> = {
         type_id: product.type_id || product.id,
         name: name.trim(),
+        tamil_name: taName.trim() || null,
         selling_price: sPrice,
       };
 

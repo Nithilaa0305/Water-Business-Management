@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import type { IconName, Role, Screen, Product } from "../types";
-import { sampleProducts } from "../data/sampleData";
 import { Icon } from "../components/Icon";
 import { formatMoney } from "../utils/formatters";
 
@@ -17,12 +16,14 @@ export function Home({
 }) {
   const { lang } = useApp();
   const [summary, setSummary] = useState({
-    cash: 0,
-    sales: 0,
+    cash: null as number | null,
+    sales: null as number | null,
+    date: "",
     profit: null as number | null,
   });
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
   const [loadingStock, setLoadingStock] = useState(true);
+  const [stockError, setStockError] = useState(false);
 
   const isManagerOrOwner = role === "owner" || role === "manager";
   const isTa = lang === "ta";
@@ -31,6 +32,7 @@ export function Home({
     // 1. Fetch Today's shop numbers (Sales, Collections, Gross Profit)
     api
       .get<{
+        date?: string;
         cash?: number;
         cash_inflow?: number;
         collections?: number;
@@ -42,12 +44,13 @@ export function Home({
       }>("/dashboard/today", token)
       .then((data) =>
         setSummary({
+          date: data.date || "",
           cash: Number(data.total_collections_today ?? data.collections ?? data.cash_inflow ?? data.cash ?? 0),
           sales: Number(data.total_sales ?? data.sales ?? 0),
           profit: data.profit !== undefined && data.profit !== null ? Number(data.profit) : null,
         }),
       )
-      .catch(() => {});
+      .catch(() => setSummary({ cash: null, sales: null, profit: null, date: "" }));
 
     // 2. Fetch real inventory for Needs Attention Today sidebar (out-of-stock first, then low-stock)
     setLoadingStock(true);
@@ -55,19 +58,9 @@ export function Home({
       .get<{ products?: Partial<Product>[] } | Partial<Product>[]>("/products/list", token)
       .then((result) => {
         const rows = Array.isArray(result) ? result : (result.products ?? []);
-        const allItems: Product[] = rows.length
-          ? rows.map((row, index) => ({
-              ...sampleProducts[index % sampleProducts.length],
-              ...row,
-              id: row.id ? Number(row.id) : index + 1,
-              stock: Number(row.stock ?? 0),
-              price: Number(row.price ?? 0),
-            }))
-          : sampleProducts;
-
-        // Out-of-stock (0) first, then items with stock <= 10
+        const allItems = rows.filter((row): row is Product => Boolean(row.type_id && typeof row.stock === "number"));
         const attentionItems = allItems
-          .filter((p) => (p.stock ?? 0) <= 10)
+          .filter((p) => p.stock === 0 || ((p.low_stock_limit ?? 0) > 0 && p.stock <= p.low_stock_limit!))
           .sort((a, b) => {
             const stockA = a.stock ?? 0;
             const stockB = b.stock ?? 0;
@@ -76,10 +69,12 @@ export function Home({
             return stockA - stockB;
           });
 
-        setLowStockProducts(attentionItems);
+        setLowStockProducts(attentionItems.slice(0, 5));
+        setStockError(false);
       })
       .catch(() => {
         setLowStockProducts([]);
+        setStockError(true);
       })
       .finally(() => {
         setLoadingStock(false);
@@ -172,7 +167,7 @@ export function Home({
                 </h3>
               </div>
               <span className="today-date-badge">
-                {new Date().toLocaleDateString(isTa ? "ta-IN" : "en-IN", {
+                {(summary.date ? new Date(`${summary.date}T12:00:00`) : new Date()).toLocaleDateString(isTa ? "ta-IN" : "en-IN", {
                   weekday: "short",
                   month: "short",
                   day: "numeric",
@@ -180,15 +175,16 @@ export function Home({
               </span>
             </div>
 
+            {summary.sales === null && <small>{isTa ? "தரவு கிடைக்கவில்லை" : "Daily totals unavailable"}</small>}
             <div className="today-metrics-strip">
               <div className="today-metric-cell">
                 <span className="metric-label">{isTa ? "இன்றைய விற்பனை" : "Today’s Sales"}</span>
-                <b className="metric-value dark">{formatMoney(summary.sales)}</b>
+                <b className="metric-value dark">{summary.sales === null ? "—" : formatMoney(summary.sales)}</b>
               </div>
 
               <div className="today-metric-cell">
                 <span className="metric-label">{isTa ? "இன்றைய வசூல்" : "Today’s Collections"}</span>
-                <b className="metric-value green">{formatMoney(summary.cash)}</b>
+                <b className="metric-value green">{summary.cash === null ? "—" : formatMoney(summary.cash)}</b>
               </div>
 
               {isManagerOrOwner && (
@@ -225,7 +221,7 @@ export function Home({
               </button>
             </div>
 
-            {loadingStock ? (
+            {stockError ? <p role="alert">{isTa ? "சரக்கு விவரம் கிடைக்கவில்லை" : "Could not load inventory alerts"}</p> : loadingStock ? (
               <div style={{ padding: "30px 20px", textAlign: "center", color: "#64748b" }}>
                 <small>{isTa ? "கையிருப்பு விவரம் சோதிக்கப்படுகிறது..." : "Checking inventory levels..."}</small>
               </div>
@@ -247,7 +243,7 @@ export function Home({
                             {isTa && p.ta ? p.ta : p.name}
                           </b>
                           <small>
-                            {p.is_returnable ? (isTa ? "19L கேன்" : "19L Can") : (isTa ? "பாட்டில்" : "Bottle")}
+                            {p.unit}
                           </small>
                         </div>
                       </div>

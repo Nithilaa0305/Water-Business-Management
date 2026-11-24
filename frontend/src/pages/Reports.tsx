@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { toInvoice } from "../utils/receipt";
+import { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import type { CreatedInvoice, Role } from "../types";
@@ -9,13 +10,10 @@ import { formatMoney } from "../utils/formatters";
 
 export function Reports({ role, token, onGoHome }: { role: Role; token: string; onGoHome: () => void }) {
   const { t, lang, speak, showToast } = useApp();
+  const shopDate = (d: Date) => d.toLocaleDateString("en-CA", {timeZone: "Asia/Colombo"});
   const [period, setPeriod] = useState<"today" | "this_week" | "this_month" | "custom">("this_month");
-  const [fromDate, setFromDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
-  });
-  const [toDate, setToDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [fromDate, setFromDate] = useState(() => `${shopDate(new Date()).slice(0, 7)}-01`);
+  const [toDate, setToDate] = useState(() => shopDate(new Date()));
 
   // Authentic 0 initial state - no dummy or mock numbers
   const [report, setReport] = useState({
@@ -30,6 +28,9 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
   const [loadingSummary, setLoadingSummary] = useState(false);
 
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [invoicesError, setInvoicesError] = useState(false);
+  const invoicesRequest = useRef(0);
+  const summaryRequest = useRef(0);
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState<"all" | "today" | "yesterday">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "credit">("all");
@@ -41,9 +42,12 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
     speak("Reports and invoices ledger loaded", "அறிக்கைகள் மற்றும் இன்வாய்ஸ்கள் ஏற்றப்பட்டது");
   }, []);
 
+  const [summaryError, setSummaryError] = useState(false);
   const loadSummaryData = () => {
     if (!isManagerOrOwner) return;
+    const request = ++summaryRequest.current;
     setLoadingSummary(true);
+    setSummaryError(false);
 
     const params = new URLSearchParams();
     params.set("period", period);
@@ -55,6 +59,7 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
     api
       .get<any>(`/reports/summary?${params.toString()}`, token)
       .then((data) => {
+        if (request !== summaryRequest.current) return;
         setReport({
           sales: Number(data.net_sales ?? data.sales ?? 0),
           collections: Number(data.collections ?? 0),
@@ -66,16 +71,19 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
         });
       })
       .catch(() => {
-        // Leave report at zero if query fails
+        if (request === summaryRequest.current) setSummaryError(true);
       })
       .finally(() => {
-        setLoadingSummary(false);
+        if (request === summaryRequest.current) setLoadingSummary(false);
       });
   };
 
   const loadInvoices = (searchQuery = search) => {
     const params = new URLSearchParams();
+    const request = ++invoicesRequest.current;
+    setInvoicesError(false);
     params.set("limit", "200");
+    params.set("date_filter", dateFilter);
     if (searchQuery.trim()) {
       params.set("q", searchQuery.trim());
     }
@@ -83,11 +91,11 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
     api
       .get<any[]>(`/invoices/list?${params.toString()}`, token)
       .then((rows) => {
-        if (Array.isArray(rows)) {
+        if (request === invoicesRequest.current && Array.isArray(rows)) {
           setInvoices(rows);
         }
       })
-      .catch(() => {});
+      .catch(() => { if (request === invoicesRequest.current) setInvoicesError(true); });
   };
 
   useEffect(() => {
@@ -95,46 +103,17 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
   }, [token, period, fromDate, toDate]);
 
   useEffect(() => {
-    loadInvoices(search);
-  }, [token]);
-
-  useEffect(() => {
     const timer = setTimeout(() => {
       loadInvoices(search);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, token, dateFilter]);
 
   // Open invoice in full A4 view
   const openInvoiceA4 = async (invoiceNumber: string) => {
     try {
       const details = await api.get<any>(`/invoices/details/${encodeURIComponent(invoiceNumber)}`, token);
-      setActiveInvoice({
-        invoice_number: details.invoice_number,
-        customer_name: details.customer_name,
-        customer_phone: details.customer_phone,
-        customer_address: details.customer_address,
-        customer_balance: details.current_customer_balance,
-        subtotal: details.subtotal || details.total,
-        amount_paid: details.amount_paid,
-        applied_to_bill: details.amount_paid,
-        applied_to_old_debt: details.applied_to_old_debt || 0,
-        balance_due: details.balance_due,
-        cans_returned: details.cans_returned || 0,
-        staff_name: details.staff_name || "Cashier",
-        date: details.date,
-        items: (details.items || []).map((it: any, idx: number) => ({
-          id: it.sale_item_id || idx + 1,
-          name: it.product_name || it.name,
-          variant: it.variant || it.type_name,
-          unit: it.unit || "unit",
-          sku: it.sku,
-          ta: it.ta,
-          quantity: it.quantity,
-          price: it.price,
-          subtotal: it.subtotal,
-        })),
-      });
+      setActiveInvoice(toInvoice(details));
     } catch (err: any) {
       showToast(
         lang === "ta"
@@ -145,21 +124,12 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
     }
   };
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().split("T")[0];
-
+  const todayStr = shopDate(new Date());
+  const yesterdayStr = shopDate(new Date(Date.now() - 86400000));
   const filteredInvoices = invoices.filter((inv) => {
-    let matchDate = true;
-    if (dateFilter === "today") matchDate = inv.date === todayStr;
-    if (dateFilter === "yesterday") matchDate = inv.date === yesterdayStr;
-
-    let matchStatus = true;
-    if (statusFilter === "completed") matchStatus = inv.due <= 0;
-    if (statusFilter === "credit") matchStatus = inv.due > 0;
-
-    return matchDate && matchStatus;
+    if (statusFilter === "all") return true;
+    if (inv.status === "cancelled") return false;
+    return statusFilter === "completed" ? inv.due <= 0 : inv.due > 0;
   });
 
   const groupedByDate: Record<string, any[]> = {};
@@ -274,42 +244,43 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
       )}
 
       {/* Top Metrics Row */}
+      {summaryError && <p role="alert">{lang === "ta" ? "அறிக்கை ஏற்றப்படவில்லை" : "Report unavailable."}</p>}
       {isManagerOrOwner && (
         <section className="report-grid">
           <Metric
             icon="sale"
             label={lang === "ta" ? "நிகர விற்பனை (Net Sales)" : "Net Sales"}
-            value={loadingSummary ? "..." : formatMoney(report.sales)}
+            value={summaryError ? "—" : loadingSummary ? "..." : formatMoney(report.sales)}
             tone="blue"
           />
           <Metric
             icon="cash"
             label={lang === "ta" ? "உண்மை வசூல் (Collections)" : "Actual Collections"}
-            value={loadingSummary ? "..." : formatMoney(report.collections)}
+            value={summaryError ? "—" : loadingSummary ? "..." : formatMoney(report.collections)}
             tone="green"
           />
           <Metric
             icon="chart"
             label={lang === "ta" ? "மொத்த லாபம் (Gross Profit)" : "Gross Profit"}
-            value={loadingSummary ? "..." : formatMoney(report.profit)}
+            value={summaryError ? "—" : loadingSummary ? "..." : formatMoney(report.profit)}
             tone="green"
           />
           <Metric
             icon="wallet"
             label={lang === "ta" ? "செலவுகள் (Expenses)" : "Expenses"}
-            value={loadingSummary ? "..." : formatMoney(report.expenses)}
+            value={summaryError ? "—" : loadingSummary ? "..." : formatMoney(report.expenses)}
             tone="red"
           />
           <Metric
             icon="receipt"
             label={lang === "ta" ? "மொத்த பில்கள் (Invoices)" : "Total Invoices"}
-            value={loadingSummary ? "..." : String(report.bills)}
+            value={summaryError ? "—" : loadingSummary ? "..." : String(report.bills)}
             tone="purple"
           />
           <Metric
             icon="return"
             label={lang === "ta" ? "சரக்கு திருப்புதல் (Returns)" : "Item Returns"}
-            value={loadingSummary ? "..." : `${report.returnsCount} (${formatMoney(report.returnsAmount)})`}
+            value={summaryError ? "—" : loadingSummary ? "..." : `${report.returnsCount} (${formatMoney(report.returnsAmount)})`}
             tone="purple"
           />
         </section>
@@ -377,10 +348,10 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
 
       {/* Day-by-Day Clickable Invoice History */}
       <section className="day-by-day-ledger" style={{ marginTop: 20 }}>
-        {dateKeys.length > 0 ? (
+        {invoicesError ? <p role="alert">{lang === "ta" ? "பில் வரலாறு கிடைக்கவில்லை" : "Could not load invoice history."}</p> : dateKeys.length > 0 ? (
           dateKeys.map((dateKey) => {
             const dayInvoices = groupedByDate[dateKey] || [];
-            const dayTotal = dayInvoices.reduce((s, inv) => s + (Number(inv.total) || 0), 0);
+            const dayTotal = dayInvoices.reduce((s, inv) => s + (inv.status === "cancelled" ? 0 : Number(inv.total) || 0), 0);
             const isToday = dateKey === todayStr;
             const isYesterday = dateKey === yesterdayStr;
 
@@ -396,7 +367,7 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
                     </span>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <small style={{ color: "#64748b", display: "block" }}>{lang === "ta" ? "நாள் மொத்த விற்பனை:" : "Day Sales:"}</small>
+                    <small style={{ color: "#64748b", display: "block" }}>{lang === "ta" ? "காட்டும் பில்களின் மொத்தம்:" : "Shown Invoice Total:"}</small>
                     <b style={{ fontSize: 17, color: "#0284c7" }}>{formatMoney(dayTotal)}</b>
                   </div>
                 </div>
@@ -435,8 +406,8 @@ export function Reports({ role, token, onGoHome }: { role: Role; token: string; 
                         <div style={{ textAlign: "right" }}>
                           <b style={{ fontSize: 15 }}>{formatMoney(Number(inv.total))}</b>
                           <div style={{ fontSize: 12 }}>
-                            {inv.due > 0 ? (
-                              <span style={{ color: "#dc2626", fontWeight: 700 }}>Due: {formatMoney(Number(inv.due))}</span>
+                            {inv.status === "cancelled" ? <span style={{ color: "#991b1b" }}>{lang === "ta" ? "ரத்து" : "Cancelled"}</span> : inv.due > 0 ? (
+                              <span style={{ color: "#b45309", fontWeight: 700 }}>Due: {formatMoney(Number(inv.due))}</span>
                             ) : (
                               <span style={{ color: "#16a34a", fontWeight: 700 }}>Paid</span>
                             )}

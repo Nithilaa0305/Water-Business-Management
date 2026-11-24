@@ -3,7 +3,7 @@ import en from "../locales/en.json";
 
 export type Lang = "en" | "ta";
 export type Role = "owner" | "manager" | "employee";
-export type Screen = "home" | "sale" | "stock" | "payments" | "reports" | "customers" | "settings";
+export type Screen = "home" | "sale" | "stock" | "payments" | "reports" | "customers";
 
 export type IconName =
   | "shop"
@@ -37,7 +37,10 @@ export type IconName =
   | "print"
   | "clock"
   | "trash"
-  | "edit";
+  | "edit"
+  | "download"
+  | "refresh"
+  | "archive";
 
 export type Product = {
   id: number;
@@ -46,6 +49,7 @@ export type Product = {
   ta: string;
   price: number;
   stock: number;
+  low_stock_limit?: number;
   icon: IconName;
   is_returnable?: boolean;
   is_active?: boolean;
@@ -54,6 +58,8 @@ export type Product = {
   buying_price?: number | null;
 };
 
+export type HeldContainer = { type_id: string; name: string; ta?: string; held: number };
+
 export type Customer = {
   id: number | string;
   name: string;
@@ -61,6 +67,7 @@ export type Customer = {
   address?: string;
   balance: number;
   cans: number;
+  container_types?: HeldContainer[];
   credit_limit?: number;
   is_active?: boolean;
 };
@@ -79,6 +86,7 @@ export type InvoiceItem = {
 
 export type CreatedInvoice = {
   invoice_number: string;
+  status?: string;
   customer_name: string;
   customer_phone?: string;
   customer_address?: string;

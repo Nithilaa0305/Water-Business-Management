@@ -65,6 +65,7 @@ export function AddProductModal({
     try {
       const payload: Record<string, any> = {
         name: name.trim(),
+        tamil_name: taName.trim() || null,
         selling_price: sPrice,
         unit,
         is_returnable: isReturnable,

@@ -186,6 +186,9 @@ const paths: Record<IconName, ReactNode> = {
       <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
     </>
   ),
+  download: <><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></>,
+  refresh: <><path d="M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5m-4 8a8 8 0 0 0 14 3l3-3m0 5v-5h-5" /></>,
+  archive: <><path d="M3 4h18v5H3zM5 9v11h14V9m-9 4h4" /></>,
   edit: (
     <>
       <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
@@ -194,10 +197,10 @@ const paths: Record<IconName, ReactNode> = {
   ),
 };
 
-export function Icon({ name, size = 30 }: { name: IconName; size?: number }) {
+export function Icon({ name, size = 30, className = "" }: { name: IconName; size?: number; className?: string }) {
   return (
     <svg
-      className="icon"
+      className={`icon ${className}`}
       width={size}
       height={size}
       viewBox="0 0 24 24"

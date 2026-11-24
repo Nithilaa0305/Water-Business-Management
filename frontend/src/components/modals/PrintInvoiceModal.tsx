@@ -1,6 +1,5 @@
 import { useState } from "react";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
+import { createPortal } from "react-dom";
 import { useApp } from "../../context/AppContext";
 import type { CreatedInvoice, Lang } from "../../types";
 import { Icon } from "../Icon";
@@ -25,6 +24,12 @@ export function PrintInvoiceModal({
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const isTa = printLang === "ta";
+  const cancelled = invoice.status === "cancelled";
+  const cancelledLabel = isTa ? "ரத்து செய்யப்பட்டது" : "Cancelled";
+  const chooseFormat = (format: "thermal" | "a4") => {
+    setPrintFormat(format);
+    localStorage.setItem("preferred_print_format", format);
+  };
 
   // Helper to detect and avoid showing internal UUIDs in the UI
   const isUUID = (val?: string) =>
@@ -39,6 +44,8 @@ export function PrintInvoiceModal({
     showToast(isTa ? "PDF உருவாக்கப்படுகிறது..." : "Generating PDF...", "info");
 
     try {
+      const [{default: jsPDF}, {default: html2canvas}] = await Promise.all([import("jspdf"), import("html2canvas")]);
+      await document.fonts.ready;
       const canvas = await html2canvas(el, {
         scale: 2,
         useCORS: true,
@@ -62,17 +69,27 @@ export function PrintInvoiceModal({
       if (isThermal || imgHeight <= pdfHeight) {
         pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, imgHeight);
       } else {
-        // Multi-page handling for long A4 invoices
-        let heightLeft = imgHeight;
-        let position = 0;
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-        heightLeft -= pdfHeight;
-
-        while (heightLeft > 0) {
-          position -= pdfHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-          heightLeft -= pdfHeight;
+        const origin = el.getBoundingClientRect();
+        const scale = canvas.height / origin.height;
+        const rowBreaks = Array.from(el.querySelectorAll("tbody tr, .a4-totals-box"))
+          .map((row) => Math.round((row.getBoundingClientRect().top - origin.top) * scale))
+          .filter((y) => y > 0);
+        const margin = 8;
+        const contentWidth = pdfWidth - margin * 2;
+        const pagePixels = Math.floor((pdfHeight - margin * 2) * canvas.width / contentWidth);
+        for (let top = 0; top < canvas.height;) {
+          const limit = Math.min(canvas.height, top + pagePixels);
+          const boundary = limit === canvas.height ? limit : Math.max(0, ...rowBreaks.filter((y) => y > top && y <= limit));
+          const end = boundary > top ? boundary : limit;
+          const slice = document.createElement("canvas");
+          slice.width = canvas.width;
+          slice.height = end - top;
+          const ctx = slice.getContext("2d");
+          if (!ctx) throw new Error("Could not prepare invoice page");
+          ctx.drawImage(canvas, 0, top, canvas.width, slice.height, 0, 0, slice.width, slice.height);
+          if (top) pdf.addPage();
+          pdf.addImage(slice.toDataURL("image/png"), "PNG", margin, margin, contentWidth, slice.height * contentWidth / slice.width);
+          top = end;
         }
       }
 
@@ -91,8 +108,8 @@ export function PrintInvoiceModal({
 
   const hasItems = Boolean(invoice.items && invoice.items.length > 0);
 
-  return (
-    <div className="modal-backdrop">
+  return createPortal(
+    <div className={`modal-backdrop invoice-print-host invoice-print-${printFormat}`}>
       <div className="modal-dialog print-modal-dialog">
         <div className="modal-header no-print">
           <div className="print-header-info">
@@ -106,13 +123,13 @@ export function PrintInvoiceModal({
             <div className="format-pills">
               <button
                 className={printFormat === "thermal" ? "active" : ""}
-                onClick={() => setPrintFormat("thermal")}
+                onClick={() => chooseFormat("thermal")}
               >
                 80mm Thermal
               </button>
               <button
                 className={printFormat === "a4" ? "active" : ""}
-                onClick={() => setPrintFormat("a4")}
+                onClick={() => chooseFormat("a4")}
               >
                 A4 Tax Invoice
               </button>
@@ -135,14 +152,14 @@ export function PrintInvoiceModal({
               type="button"
               className="btn-print-action"
               onClick={handleDownloadPdf}
-              disabled={downloadingPdf}
+              disabled={downloadingPdf || !hasItems}
               title={isTa ? "நேரடியாக PDF கோப்பை பதிவிறக்கம் செய்ய" : "Download PDF file directly"}
               style={{ background: "#0284c7", color: "#fff", border: "none" }}
             >
               <Icon name="download" size={16} />
               <span>{downloadingPdf ? (isTa ? "தயாராகிறது..." : "Downloading...") : (isTa ? "PDF பதிவிறக்கம்" : "Download PDF")}</span>
             </button>
-            <button className="btn-print-action" onClick={() => window.print()} title="Print Invoice">
+            <button className="btn-print-action" onClick={() => window.print()} disabled={!hasItems} title="Print Invoice">
               <Icon name="print" size={16} />
               <span>{isTa ? "அச்சிடு" : "Print"}</span>
             </button>
@@ -172,6 +189,7 @@ export function PrintInvoiceModal({
                 )}
                 <div className="receipt-divider" />
                 <div className="receipt-meta-grid">
+                  {cancelled && <strong className="receipt-cancelled">{cancelledLabel}</strong>}
                   <span>{isTa ? "இன்வாய்ஸ் எண்:" : "Invoice No:"} <b>{invoice.invoice_number}</b></span>
                   <span>{isTa ? "தேதி:" : "Date:"} <b>{new Date(invoice.date).toLocaleDateString()}</b></span>
                   <span>{isTa ? "வாடிக்கையாளர்:" : "Customer:"} <b>{invoice.customer_name}</b></span>
@@ -324,7 +342,7 @@ export function PrintInvoiceModal({
                 <div className="a4-address-box">
                   <small>{isTa ? "கட்டண விவரம்:" : "Payment & Dispatch:"}</small>
                   <p>{isTa ? "பணியாளர்:" : "Billed By:"} <b>{invoice.staff_name || "Cashier"}</b></p>
-                  <p>{isTa ? "நிலை:" : "Status:"} <b>{invoice.balance_due > 0 ? (isTa ? "பகுதி / கடன்" : "Credit / Partial") : (isTa ? "முழுவதும் செலுத்தப்பட்டது" : "Fully Paid")}</b></p>
+                  <p>{isTa ? "நிலை:" : "Status:"} <b>{cancelled ? cancelledLabel : invoice.balance_due > 0 ? (isTa ? "பகுதி / கடன்" : "Credit / Partial") : (isTa ? "முழுவதும் செலுத்தப்பட்டது" : "Fully Paid")}</b></p>
                 </div>
               </div>
 
@@ -464,6 +482,7 @@ export function PrintInvoiceModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

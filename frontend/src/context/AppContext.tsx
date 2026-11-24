@@ -26,12 +26,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const t = (key: keyof typeof en) => (dictionary as Record<string, string>)[key] ?? key;
 
   const speak = (enText: string, taText: string) => {
-    if (!voice || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const message = new SpeechSynthesisUtterance(lang === "ta" ? taText : enText);
-    message.lang = lang === "ta" ? "ta-IN" : "en-IN";
-    message.rate = 0.88;
-    window.speechSynthesis.speak(message);
+    if (!voice) return;
+    const preferredLanguage = lang === "ta" ? "ta-IN" : "en-IN";
+    const speech = window.speechSynthesis;
+    const available = speech?.getVoices().filter((speaker) => speaker.localService) || [];
+    const speaker = available.find((option) => option.lang === preferredLanguage) ||
+      available.find((option) => option.lang.toLowerCase().startsWith(lang + "-"));
+    if (speaker) {
+      speech.cancel();
+      const message = new SpeechSynthesisUtterance(lang === "ta" ? taText : enText);
+      message.voice = speaker;
+      message.lang = speaker.lang;
+      message.rate = 0.88;
+      speech.speak(message);
+    } else if (typeof AudioContext !== "undefined" && navigator.userActivation?.hasBeenActive) {
+      const audio = new AudioContext();
+      const tone = audio.createOscillator();
+      const volume = audio.createGain();
+      const now = audio.currentTime;
+      tone.frequency.value = 660;
+      volume.gain.setValueAtTime(0.1, now);
+      volume.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      tone.connect(volume).connect(audio.destination);
+      tone.start(now);
+      tone.stop(now + 0.16);
+      tone.onended = () => { void audio.close().catch(() => {}); };
+    }
   };
 
   const removeToast = useCallback((id: string) => {

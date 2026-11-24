@@ -1,13 +1,12 @@
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@500;600;700;800&family=Nunito:wght@500;600;700;800;900&display=swap");
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Nunito", "Noto Sans Tamil", sans-serif;
+  --font-sans: "Nunito Variable", "Noto Sans Tamil Variable", sans-serif;
 }
 
 @layer base {
   :root {
-    font-family: "Nunito", "Noto Sans Tamil", sans-serif;
+    font-family: "Nunito Variable", "Noto Sans Tamil Variable", sans-serif;
     color: #172038;
     background: #f7f7f3;
     font-synthesis: none;
@@ -3092,7 +3091,7 @@
   background: #ffffff;
   color: #000000;
   padding: 20px;
-  font-family: "Nunito", "Noto Sans Tamil", system-ui, -apple-system, sans-serif;
+  font-family: "Nunito Variable", "Noto Sans Tamil Variable", system-ui, -apple-system, sans-serif;
   font-size: 11px;
   line-height: 1.35;
   border-radius: 8px;
@@ -3172,7 +3171,7 @@
   background: #ffffff;
   color: #000000;
   padding: 32px;
-  font-family: "Nunito", "Noto Sans Tamil", system-ui, -apple-system, sans-serif;
+  font-family: "Nunito Variable", "Noto Sans Tamil Variable", system-ui, -apple-system, sans-serif;
   font-size: 12px;
   border-radius: 8px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
@@ -4042,99 +4041,49 @@ input[type="number"] {
   }
 }
 
+/* The receipt is portaled directly to body. Do not hide one of its ancestors. */
+@page billing-a4 { size: A4; margin: 8mm; }
+@page billing-thermal { size: auto; margin: 2mm; }
 @media print {
-  /* Strictly hide everything outside the printable invoice modal */
-  body > *:not(#root),
-  .app-header,
-  .subbar,
-  .subbar-nav,
-  .mobile-nav,
-  .no-print,
-  .print-button,
-  .modal-header,
-  .modal-actions,
-  .floating-toast-container,
-  .stepper,
-  .sale-header,
-  .sale-step3-layout,
-  .step-actions,
-  .order-review-container,
-  .can-tracker-box,
-  .payment-methods-grid,
-  .page-title,
-  .workflow-header,
-  .workflow-page > *:not(.modal-backdrop),
-  .page-content > *:not(.modal-backdrop) {
+  body:has(> .invoice-print-host) > :not(.invoice-print-host),
+  .invoice-print-host .no-print,
+  .invoice-print-host .modal-header,
+  .invoice-print-host .modal-actions {
     display: none !important;
   }
 
-  body, html, #root {
-    background: #ffffff !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    overflow: visible !important;
-    width: 100% !important;
-    height: auto !important;
-  }
-  .app-shell, .page-content, .workflow-page {
-    padding: 0 !important;
-    margin: 0 !important;
-    background: #ffffff !important;
+  html, body, .invoice-print-host, .invoice-print-host .print-modal-dialog,
+  .invoice-print-host .printable-scroll-wrapper {
     display: block !important;
-    width: 100% !important;
-  }
-  .modal-backdrop {
     position: static !important;
-    background: #ffffff !important;
-    display: block !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-  }
-  .modal-dialog,
-  .print-modal-dialog {
-    box-shadow: none !important;
-    border: none !important;
-    background: #ffffff !important;
+    width: auto !important;
+    height: auto !important;
     max-width: none !important;
-    width: 100% !important;
     max-height: none !important;
     overflow: visible !important;
-    padding: 0 !important;
+    background: #fff !important;
     margin: 0 !important;
-  }
-  .printable-scroll-wrapper {
-    background: #ffffff !important;
     padding: 0 !important;
-    margin: 0 !important;
-    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
   }
-  .thermal-receipt,
-  .a4-invoice {
+  .invoice-print-a4 { page: billing-a4; }
+  .invoice-print-thermal { page: billing-thermal; }
+  .invoice-print-host .thermal-receipt,
+  .invoice-print-host .a4-invoice {
     box-shadow: none !important;
     border: none !important;
-    background: #ffffff !important;
+    background: #fff !important;
     width: 100% !important;
     max-width: none !important;
     padding: 0 !important;
     margin: 0 !important;
   }
-  .a4-table {
-    page-break-inside: auto !important;
-  }
-  .a4-table tr {
-    page-break-inside: avoid !important;
-    page-break-after: auto !important;
-  }
-  .a4-table thead {
-    display: table-header-group !important;
-  }
-  .a4-bottom-grid {
-    page-break-inside: avoid !important;
-  }
-  .a4-footer-signatures {
-    page-break-inside: avoid !important;
-  }
+  .invoice-print-host .thermal-receipt { max-width: 76mm !important; }
+  .invoice-print-host .a4-table thead { display: table-header-group !important; }
+  .invoice-print-host tr,
+  .invoice-print-host .a4-bottom-grid,
+  .invoice-print-host .a4-footer-signatures { break-inside: avoid; }
 }
 
 /* ============================================================

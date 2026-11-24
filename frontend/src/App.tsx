@@ -10,7 +10,6 @@ import { Stock } from "./pages/Stock";
 import { Payments } from "./pages/Payments";
 import { Customers } from "./pages/Customers";
 import { Reports } from "./pages/Reports";
-import { Settings } from "./pages/Settings";
 
 function AuthenticatedApp({
   token,
@@ -52,10 +51,8 @@ function AuthenticatedApp({
         <Payments token={token} role={role} onGoHome={goHome} />
       ) : screen === "customers" ? (
         <Customers token={token} role={role} onGoHome={goHome} />
-      ) : screen === "reports" ? (
-        <Reports role={role} token={token} onGoHome={goHome} />
       ) : (
-        <Settings role={role} onGoHome={goHome} />
+        <Reports role={role} token={token} onGoHome={goHome} />
       )}
     </Shell>
   );
@@ -80,9 +77,9 @@ function Root() {
     const token = sessionStorage.getItem("access_token");
     if (!token) return;
     api
-      .get<{ name?: string; role?: Role }>("/auth/me", token)
+      .get<{ full_name?: string; role?: Role }>("/auth/me", token)
       .then((user) =>
-        setSession({ token, role: user.role || "employee", name: user.name || "Shop user" }),
+        setSession({ token, role: user.role || "employee", name: user.full_name || "Shop user" }),
       )
       .catch(() => sessionStorage.removeItem("access_token"));
   }, []);

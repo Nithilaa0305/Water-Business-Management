@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import type { Customer, CreatedInvoice, Role } from "../types";
-import { sampleCustomers } from "../data/sampleData";
+
 import { Icon } from "../components/Icon";
 import { AddCustomerModal } from "../components/modals/AddCustomerModal";
 import { PrintInvoiceModal } from "../components/modals/PrintInvoiceModal";
@@ -18,8 +18,8 @@ export function Customers({
   onGoHome?: () => void;
 }) {
   const { t, lang, speak, showToast } = useApp();
-  const [selected, setSelected] = useState<Customer>(sampleCustomers[0]);
-  const [customers, setCustomers] = useState<Customer[]>(sampleCustomers);
+  const [selected, setSelected] = useState<Customer>({ id: "", name: "", phone: "", balance: 0, cans: 0 });
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -48,7 +48,6 @@ export function Customers({
       .then((result) => {
         const rows = Array.isArray(result) ? result : (result.customers ?? []);
         const mapped: Customer[] = rows.map((row, index) => ({
-          ...sampleCustomers[index % sampleCustomers.length],
           ...row,
           id: row.id ? String(row.id) : String(index + 1),
           name: String(row.name || "Customer"),
@@ -60,12 +59,10 @@ export function Customers({
           is_active: row.is_active !== false,
         }));
         setCustomers(mapped);
-        if (mapped.length > 0) {
-          setSelected((curr) => mapped.find((m) => String(m.id) === String(curr?.id)) || mapped[0]);
-        }
+        setSelected((curr) => mapped.find((m) => m.id === curr.id) || mapped[0] || { id: "", name: "", phone: "", balance: 0, cans: 0 });
       })
       .catch((err) => {
-        console.error("Failed to load customers:", err);
+        showToast(lang === "ta" ? "வாடிக்கையாளர்களை ஏற்ற முடியவில்லை" : "Could not load customers", "error");
       });
   };
 

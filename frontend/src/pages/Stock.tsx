@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import type { IconName, Product, Role } from "../types";
-import { sampleProducts, classifyProductRank } from "../data/sampleData";
 import { Icon } from "../components/Icon";
 import { AddProductModal } from "../components/modals/AddProductModal";
 import { EditProductModal } from "../components/modals/EditProductModal";
@@ -64,8 +63,8 @@ export const STARTER_SLOTS: StarterSlotSpec[] = [
   },
   {
     rank: 5,
-    label: "19 L",
-    taLabel: "19 லிட்டர்",
+    label: "19 L Filled",
+    taLabel: "19 லிட்டர் நிரப்பியது",
     unit: "can",
     icon: "can",
     matchSkus: ["SKU-19L", "19L", "SKU-19L-FILLED", "SKU-WAT-19L"],
@@ -107,6 +106,8 @@ export function Stock({
   const [historyTab, setHistoryTab] = useState<"batches" | "movements">("batches");
   const [activeBatches, setActiveBatches] = useState<any[]>([]);
   const [stockMovements, setStockMovements] = useState<any[]>([]);
+  const historyRequest = useRef(0);
+  const [historyError, setHistoryError] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Stock Reduction (Damage / Expiry / Adjustment)
@@ -171,16 +172,20 @@ export function Stock({
   const loadBatchesAndMovements = (typeId?: string) => {
     const tid = typeId || selectedProduct?.type_id;
     if (!tid) return;
+    const request = ++historyRequest.current;
+    setHistoryError(false);
     setLoadingHistory(true);
     Promise.all([
-      api.get<any[]>(`/stock/batches?type_id=${encodeURIComponent(tid)}`, token).catch(() => []),
-      api.get<any[]>(`/stock/movements?type_id=${encodeURIComponent(tid)}`, token).catch(() => []),
+      api.get<any[]>(`/stock/batches?type_id=${encodeURIComponent(tid)}`, token),
+      api.get<any[]>(`/stock/movements?type_id=${encodeURIComponent(tid)}`, token),
     ])
       .then(([batches, movements]) => {
+        if (request !== historyRequest.current) return;
         if (Array.isArray(batches)) setActiveBatches(batches);
         if (Array.isArray(movements)) setStockMovements(movements);
       })
-      .finally(() => setLoadingHistory(false));
+      .catch(() => { if (request === historyRequest.current) setHistoryError(true); })
+      .finally(() => { if (request === historyRequest.current) setLoadingHistory(false); });
   };
 
   useEffect(() => {
@@ -384,13 +389,10 @@ export function Stock({
   // Match 6 starter slots to explicit catalog SKUs/names; unclaimed SKUs flow to otherProducts
   const claimedTypeIds = new Set<string>();
   const starterCards: Array<{ slot: StarterSlotSpec; product: Product | null }> = STARTER_SLOTS.map((slot) => {
-    const match = products.find((p) => {
+    const candidates = products.filter((p) => p.type_id && !claimedTypeIds.has(p.type_id));
+    const bySku = candidates.find(p => p.sku && slot.matchSkus.some(sku => sku.toLowerCase() === p.sku!.trim().toLowerCase()));
+    const byName = candidates.filter((p) => {
       if (!p.type_id || claimedTypeIds.has(p.type_id)) return false;
-
-      // 1. Explicit SKU match
-      if (p.sku && slot.matchSkus.some((s) => s.toLowerCase() === p.sku!.trim().toLowerCase())) {
-        return true;
-      }
 
       // 2. Explicit exact name match
       const pName = p.name.trim().toLowerCase();
@@ -406,6 +408,7 @@ export function Stock({
       return false;
     });
 
+    const match = bySku ?? (byName.length === 1 ? byName[0] : undefined);
     if (match && match.type_id) {
       claimedTypeIds.add(match.type_id);
       return { slot, product: match };
@@ -1002,7 +1005,7 @@ export function Stock({
               </button>
             </div>
 
-            {loadingHistory ? (
+            {historyError ? <p role="alert">{lang === "ta" ? "சரக்கு வரலாறு கிடைக்கவில்லை" : "Could not load stock history."}</p> : loadingHistory ? (
               <div style={{ padding: 20, textAlign: "center", color: "#64748b" }}>Loading history...</div>
             ) : historyTab === "batches" ? (
               <div style={{ maxHeight: 350, overflowY: "auto" }}>

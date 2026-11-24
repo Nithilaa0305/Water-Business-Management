@@ -1,4 +1,5 @@
 {
+  "done": "Done",
   "appName": "Namma Wholesale",
   "tagline": "Simple invoicing, made for your shop",
   "hello": "Good day",
@@ -31,7 +32,7 @@
   "selected": "Selected",
   "chooseItems": "Tap an item to add",
   "total": "TOTAL",
-  "saveBill": "SAVE INVOICE",
+  "saveBill": "PAY & SAVE",
   "receiveStock": "RECEIVE STOCK",
   "adjustStock": "ADJUST STOCK",
   "changePrice": "CHANGE PRICE",

@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import type { Customer, Role } from "../types";
-import { sampleCustomers } from "../data/sampleData";
+import { hasPendingOperation, retryOperation, submitOnce } from "../services/operations";
+const noCustomer: Customer = { id: "", name: "", phone: "", balance: 0, cans: 0 };
 import { Icon } from "../components/Icon";
 import { formatMoney } from "../utils/formatters";
 
@@ -16,17 +17,20 @@ export function Payments({
   onGoHome?: () => void;
 }) {
   const { t, lang, speak, showToast } = useApp();
-  const [customers, setCustomers] = useState<Customer[]>(sampleCustomers);
-  const [customer, setCustomer] = useState<Customer>(sampleCustomers[0]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customer, setCustomer] = useState<Customer>(noCustomer);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
-  const [statusState, setStatusState] = useState<"idle" | "saving" | "unknown">("idle");
+  const settlementInFlight = useRef(false);
+  const customerRequest = useRef(0);
+  const [customerError, setCustomerError] = useState(false);
   const [refreshingBalance, setRefreshingBalance] = useState(false);
 
   // Settlement Form State (Money & Cans together)
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank">("cash");
   const [moneyNotes, setMoneyNotes] = useState("");
+  const [returnCanType, setReturnCanType] = useState("");
   const [canQty, setCanQty] = useState("");
   const [canNotes, setCanNotes] = useState("");
 
@@ -46,7 +50,7 @@ export function Payments({
   const [returnItemId, setReturnItemId] = useState<string>("");
   const [returnQty, setReturnQty] = useState<string>("1");
   const [returnReason, setReturnReason] = useState<string>("");
-  const [returnDamaged, setReturnDamaged] = useState<boolean>(false);
+  const [restockReturn, setRestockReturn] = useState<boolean>(false);
   const [cancelReason, setCancelReason] = useState<string>("");
 
   // Recent payments & Mistake correction state
@@ -59,23 +63,18 @@ export function Payments({
   const isManagerOrOwner = role === "owner" || role === "manager";
 
   const loadCustomers = () => {
-    api
-      .get<{ customers?: Partial<Customer>[] } | Partial<Customer>[]>("/customers/list", token)
-      .then((result) => {
-        const rows = Array.isArray(result) ? result : (result.customers ?? []);
-        if (rows.length) {
-          const mapped = rows.map((row, index) => ({
-            ...sampleCustomers[index % sampleCustomers.length],
-            ...row,
-            id: row.id ? String(row.id) : index + 1,
-            balance: Number(row.balance ?? 0),
-            cans: Number(row.cans ?? 0),
-          }));
-          setCustomers(mapped);
-          setCustomer((curr) => mapped.find((m) => String(m.id) === String(curr.id)) || mapped[0]);
-        }
+    const requestId = ++customerRequest.current;
+    setCustomerError(false);
+    api.get<Customer[]>(`/customers/list?q=${encodeURIComponent(query)}`, token)
+      .then((rows) => {
+        if (requestId !== customerRequest.current) return;
+        setCustomers(rows);
+        setCustomer((curr) => {
+          const row = rows.find((item) => item.id === curr.id);
+          return row ? { ...curr, ...row } : curr;
+        });
       })
-      .catch(() => {});
+      .catch(() => { if (requestId === customerRequest.current) setCustomerError(true); });
   };
 
   const loadRecentPayments = (customerId?: string) => {
@@ -91,27 +90,55 @@ export function Payments({
       .catch(() => {});
   };
 
+  const heldTypes = customer.container_types || [];
+  const selectedCanType = heldTypes.length === 1 ? heldTypes[0].type_id : returnCanType;
+  const pendingPaths = ([
+    ["/payments/receive", "payment", "பணம்"],
+    ["/containers/movement", "can return", "கேன் வரவு"],
+    ["/sales/return-item", "goods return", "சரக்கு திருப்புதல்"],
+  ] as const).filter(([path]) => hasPendingOperation(path, token));
+
+  const retryUnconfirmed = async (path: string) => {
+    if (settlementInFlight.current || saving) return;
+    settlementInFlight.current = true;
+    setSaving(true);
+    try {
+      await retryOperation(path, token);
+      if (path === "/payments/receive") { setAmount(""); setMoneyNotes(""); }
+      if (path === "/containers/movement") { setCanQty(""); setCanNotes(""); }
+      if (path === "/sales/return-item") {
+        setReturnReason(""); setReturnQty("1"); setRestockReturn(false);
+        if (invoiceQuery.trim()) handleSearchInvoice();
+        window.dispatchEvent(new CustomEvent("refresh-stock-data"));
+      }
+      if ((path === "/payments/receive" && partialFailure?.failed === "money") ||
+          (path === "/containers/movement" && partialFailure?.failed === "cans")) setPartialFailure(null);
+      showToast(lang === "ta" ? "முந்தைய பதிவு உறுதி செய்யப்பட்டது." : "Previous entry confirmed.", "success");
+      window.dispatchEvent(new CustomEvent("refresh-customer-data"));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not confirm previous entry", "error");
+    } finally {
+      settlementInFlight.current = false;
+      setSaving(false);
+    }
+  };
+
   const refreshBalance = async (silent = false) => {
     if (!customer?.id) return;
     setRefreshingBalance(true);
     try {
-      const freshCust = await api.get<any>(`/customers/details/${customer.id}`, token);
+      const freshCust = await api.get<Customer>(`/customers/details/${customer.id}`, token);
       if (freshCust) {
         const b = Number(freshCust.balance ?? 0);
         const c = Number(freshCust.cans ?? 0);
-        setCustomer((prev) => ({
-          ...prev,
-          balance: b,
-          cans: c,
-        }));
+        setCustomer((prev) => prev.id === customer.id ? { ...prev, balance: b, cans: c, container_types: freshCust.container_types } : prev);
         setCustomers((prev) =>
           prev.map((item) =>
             String(item.id) === String(customer.id)
-              ? { ...item, balance: b, cans: c }
+              ? { ...item, balance: b, cans: c, container_types: freshCust.container_types }
               : item
           )
         );
-        setStatusState("idle");
         if (!silent) {
           showToast(
             lang === "ta"
@@ -131,8 +158,9 @@ export function Payments({
   };
 
   useEffect(() => {
-    loadCustomers();
-  }, [token]);
+    const timer = setTimeout(loadCustomers, 200);
+    return () => clearTimeout(timer);
+  }, [token, query]);
 
   useEffect(() => {
     const handleRefresh = () => {
@@ -144,24 +172,20 @@ export function Payments({
     };
     window.addEventListener("refresh-customer-data", handleRefresh);
     return () => window.removeEventListener("refresh-customer-data", handleRefresh);
-  }, [customer?.id]);
+  }, [customer?.id, query, token]);
 
   useEffect(() => {
     if (customer && customer.id) {
       loadRecentPayments(String(customer.id));
+      refreshBalance(true);
+      setReturnCanType("");
       setPartialFailure(null);
-      setStatusState("idle");
     }
   }, [customer?.id, token]);
 
   // UNIFIED SETTLEMENT SUBMIT (Money and Cans together)
   const submitSettlement = async () => {
-    if (statusState === "unknown") {
-      // User clicked "Check whether it saved"
-      await refreshBalance(false);
-      return;
-    }
-
+    if (!customer.id || settlementInFlight.current || pendingPaths.length) return;
     const numAmt = Number(amount) || 0;
     const numCans = Number(canQty) || 0;
 
@@ -179,11 +203,9 @@ export function Payments({
       return;
     }
 
+    settlementInFlight.current = true;
     setSaving(true);
-    setStatusState("saving");
 
-    const payOpId = "pay-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
-    const canOpId = "can-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
 
     let moneySucceeded = false;
     let cansSucceeded = false;
@@ -198,14 +220,13 @@ export function Payments({
     // 1. Process Money if entered
     if (shouldProcessMoney) {
       try {
-        const res = await api.post<any>(
+        const res = await submitOnce<any>(
           "/payments/receive",
           {
             customer_id: customer.id,
             amount: numAmt,
             payment_method: paymentMethod,
             notes: moneyNotes || `Collected via ${paymentMethod.toUpperCase()}`,
-            operation_id: payOpId,
           },
           token
         );
@@ -216,7 +237,7 @@ export function Payments({
           newBalance = customer.balance - numAmt;
         }
         // Update balance immediately without full reload
-        setCustomer((prev) => ({ ...prev, balance: newBalance }));
+        setCustomer((prev) => prev.id === customer.id ? { ...prev, balance: newBalance } : prev);
         setCustomers((prev) =>
           prev.map((c) => (String(c.id) === String(customer.id) ? { ...c, balance: newBalance } : c))
         );
@@ -228,14 +249,14 @@ export function Payments({
     // 2. Process Cans if entered
     if (shouldProcessCans) {
       try {
-        const res = await api.post<any>(
+        const res = await submitOnce<any>(
           "/containers/movement",
           {
             customer_id: customer.id,
             quantity: numCans,
             action: "return",
+            ...(selectedCanType ? { type_id: selectedCanType } : {}),
             notes: canNotes || "Empty 19L cans returned by customer",
-            operation_id: canOpId,
           },
           token
         );
@@ -246,7 +267,7 @@ export function Payments({
           newCans = Math.max(0, customer.cans - numCans);
         }
         // Update cans immediately without full reload
-        setCustomer((prev) => ({ ...prev, cans: newCans }));
+        setCustomer((prev) => prev.id === customer.id ? { ...prev, cans: newCans } : prev);
         setCustomers((prev) =>
           prev.map((c) => (String(c.id) === String(customer.id) ? { ...c, cans: newCans } : c))
         );
@@ -255,6 +276,7 @@ export function Payments({
       }
     }
 
+    settlementInFlight.current = false;
     setSaving(false);
 
     // Evaluate combinations
@@ -272,7 +294,6 @@ export function Payments({
         setCanQty("");
         setCanNotes("");
         setPartialFailure(null);
-        setStatusState("idle");
         loadRecentPayments(String(customer.id));
         window.dispatchEvent(new CustomEvent("refresh-customer-data"));
       } else if (moneySucceeded && !cansSucceeded) {
@@ -280,7 +301,6 @@ export function Payments({
         setAmount("");
         setMoneyNotes("");
         setPartialFailure({ failed: "cans", error: canError, savedAmount: numAmt });
-        setStatusState("idle");
         showToast(
           lang === "ta"
             ? `${formatMoney(numAmt)} பணம் வரவு சேமிக்கப்பட்டது! ஆனால் காலி கேன்கள் பதிவு தோல்வியடைந்தது: ${canError}. கேன்களை மட்டும் மீண்டும் பதிவு செய்யவும்.`
@@ -294,7 +314,6 @@ export function Payments({
         setCanQty("");
         setCanNotes("");
         setPartialFailure({ failed: "money", error: moneyError, savedCans: numCans });
-        setStatusState("idle");
         showToast(
           lang === "ta"
             ? `${numCans} காலிகேன்கள் வரவு சேமிக்கப்பட்டது! ஆனால் பணம் வரவு தோல்வியடைந்தது: ${moneyError}. பணத்தை மட்டும் மீண்டும் பதிவு செய்யவும்.`
@@ -303,7 +322,6 @@ export function Payments({
         );
         window.dispatchEvent(new CustomEvent("refresh-customer-data"));
       } else {
-        setStatusState("idle");
         showToast(
           lang === "ta"
             ? `பதிவு தோல்வியடைந்தது. பணம்: ${moneyError} | கேன்கள்: ${canError}`
@@ -323,11 +341,9 @@ export function Payments({
         setAmount("");
         setMoneyNotes("");
         setPartialFailure(null);
-        setStatusState("idle");
         loadRecentPayments(String(customer.id));
         window.dispatchEvent(new CustomEvent("refresh-customer-data"));
       } else {
-        setStatusState("idle");
         showToast(moneyError, "error");
       }
     } else if (shouldProcessCans) {
@@ -342,10 +358,8 @@ export function Payments({
         setCanQty("");
         setCanNotes("");
         setPartialFailure(null);
-        setStatusState("idle");
         window.dispatchEvent(new CustomEvent("refresh-customer-data"));
       } else {
-        setStatusState("idle");
         showToast(canError, "error");
       }
     }
@@ -371,7 +385,7 @@ export function Payments({
 
   // Submit: Return item
   const submitItemReturn = async () => {
-    if (!selectedInvoice || !returnItemId) return;
+    if (!selectedInvoice || selectedInvoice.status !== "completed" || !returnItemId || saving || hasPendingOperation("/sales/return-item", token)) return;
     const qty = Number(returnQty);
     if (!qty || qty <= 0) {
       showToast(lang === "ta" ? "திருப்பி அனுப்பும் எண்ணிக்கையை உள்ளிடவும்" : "Enter valid return quantity", "error");
@@ -384,13 +398,13 @@ export function Payments({
 
     setSaving(true);
     try {
-      const fullReason = returnDamaged ? `[DAMAGED/SCRAP] ${returnReason.trim()}` : returnReason.trim();
-      await api.post(
+      await submitOnce(
         "/sales/return-item",
         {
           sale_item_id: returnItemId,
           quantity: qty,
-          reason: fullReason,
+          reason: returnReason.trim(),
+          restock: restockReturn,
         },
         token,
       );
@@ -409,6 +423,7 @@ export function Payments({
       window.dispatchEvent(new CustomEvent("refresh-customer-data"));
       setReturnQty("1");
       setReturnReason("");
+      setRestockReturn(false);
     } catch (err: any) {
       showToast(err.message || "Failed to process return", "error");
     } finally {
@@ -541,15 +556,13 @@ export function Payments({
 
   const numEnteredAmt = Number(amount) || 0;
   const numEnteredCans = Number(canQty) || 0;
-  const projectedBalance = Math.max(0, customer.balance - numEnteredAmt);
+  const projectedBalance = customer.balance - numEnteredAmt;
   const projectedCans = Math.max(0, customer.cans - numEnteredCans);
 
   // Primary button label determination
   let buttonLabel = lang === "ta" ? "வரவு சேமிக்க (Record Settlement)" : "RECORD SETTLEMENT";
   if (saving) {
     buttonLabel = lang === "ta" ? "சேமிக்கப்படுகிறது..." : "Recording...";
-  } else if (statusState === "unknown") {
-    buttonLabel = lang === "ta" ? "பதிவானதா என சரிபார்க்கவும் (Check whether it saved)" : "Check whether it saved";
   } else if (partialFailure?.failed === "cans") {
     buttonLabel = lang === "ta"
       ? `காலிகேன் மட்டும் மீண்டும் பதிவு செய் (${canQty || 0} கேன்கள்)`
@@ -572,16 +585,27 @@ export function Payments({
       : `RECORD ${numEnteredCans} EMPTY CANS`;
   }
 
-  const isButtonDisabled =
-    saving ||
-    (statusState !== "unknown" &&
-      partialFailure?.failed !== "cans" &&
-      partialFailure?.failed !== "money" &&
-      numEnteredAmt <= 0 &&
-      numEnteredCans <= 0);
+  const invalidCanQuantity = partialFailure?.failed !== "money" && (
+    !Number.isInteger(numEnteredCans) || numEnteredCans < 0 || (numEnteredCans > 0 && (
+      (heldTypes.length > 1 && !selectedCanType) ||
+      numEnteredCans > (heldTypes.find((row) => row.type_id === selectedCanType)?.held ?? customer.cans)
+    ))
+  );
+  const isButtonDisabled = saving || !customer.id || pendingPaths.length > 0 || invalidCanQuantity ||
+    !/^\d*(?:\.\d{0,2})?$/.test(amount) ||
+    (partialFailure?.failed === "cans" ? numEnteredCans <= 0 :
+     partialFailure?.failed === "money" ? numEnteredAmt <= 0 : numEnteredAmt <= 0 && numEnteredCans <= 0);
 
   return (
     <div className="workflow-page payments-page">
+      {pendingPaths.map(([path, en, ta]) => (
+        <div key={path} className="workflow-card" role="status">
+          <p>{lang === "ta" ? `முந்தைய ${ta} உறுதி செய்யப்படவில்லை.` : `The previous ${en} is not confirmed.`}</p>
+          <button type="button" className="primary-action" disabled={saving} onClick={() => retryUnconfirmed(path)}>
+            {lang === "ta" ? `அதே ${ta} மீண்டும் முயற்சி செய்` : `Retry the same ${en}`}
+          </button>
+        </div>
+      ))}
       <div className="page-title compact" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <p className="eyebrow">{t("payReturn")}</p>
@@ -604,15 +628,16 @@ export function Payments({
             )}
           </label>
           <div className="choice-list inside-scroll">
+            {customerError && <p role="alert">{lang === "ta" ? "வாடிக்கையாளர்களை ஏற்ற முடியவில்லை" : "Could not load customers"}</p>}
             {filteredCustomers.map((c) => (
               <button
                 className={`customer-item-btn ${customer.id === c.id ? "selected" : ""}`}
                 key={String(c.id)}
+                disabled={saving || !!partialFailure}
                 onClick={() => {
                   setCustomer(c);
                   setSelectedInvoice(null);
                   setPartialFailure(null);
-                  setStatusState("idle");
                 }}
               >
                 <span className="cust-info">
@@ -633,6 +658,7 @@ export function Payments({
         {/* Right Column: Unified Form with Money + Cans Together */}
         <div className="workflow-card amount-card inside-scroll">
           {/* Customer Summary Banner with Instant Refresh Button */}
+          {!customer.id && <p>{lang === "ta" ? "வாடிக்கையாளரைத் தேர்ந்தெடுக்கவும்" : "Select a customer to record a settlement."}</p>}
           <div className="selected-item-banner" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc", padding: "10px 14px", borderRadius: 8, border: "1px solid #e2e8f0" }}>
             <div>
               <b style={{ fontSize: 17, color: "#0f172a" }}>{customer.name}</b>
@@ -692,6 +718,10 @@ export function Payments({
                   ? "ஏற்கனவே சேமிக்கப்பட்ட பகுதி மீண்டும் சேர்க்கப்படாது. தோல்வியடைந்த பகுதியை மட்டும் மீண்டும் சேமிக்க கீழே உள்ள பொத்தானை அழுத்தவும்."
                   : "The saved portion will not be double-charged. You can retry the failed action below without duplicate entries."}
               </small>
+              {pendingPaths.length === 0 && <button className="link-button" type="button" onClick={() => {
+                setPartialFailure(null);
+                setAmount(""); setMoneyNotes(""); setCanQty(""); setCanNotes("");
+              }}>{lang === "ta" ? "மீதியை இப்போது பதிவு செய்ய வேண்டாம்" : "Skip the unsaved part"}</button>}
             </div>
           )}
 
@@ -817,6 +847,16 @@ export function Payments({
                   />
                 </div>
 
+                {numEnteredCans > 0 && heldTypes.length > 1 && (
+                  <label>
+                    {lang === "ta" ? "கேன் வகை" : "Can type"}
+                    <select value={returnCanType} disabled={saving} onChange={(e) => setReturnCanType(e.target.value)}>
+                      <option value="">{lang === "ta" ? "வகையைத் தேர்ந்தெடு" : "Choose type"}</option>
+                      {heldTypes.map((row) => <option key={row.type_id} value={row.type_id}>{lang === "ta" ? row.ta || row.name : row.name} ({row.held})</option>)}
+                    </select>
+                  </label>
+                )}
+                {invalidCanQuantity && <p role="alert">{lang === "ta" ? "கேன் வகையையும் எண்ணிக்கையையும் சரிபார்க்கவும்." : "Check the can type and quantity."}</p>}
                 {numEnteredCans > 0 && (
                   <div style={{ marginTop: 6, fontSize: 12, color: "#0284c7", fontWeight: 700, background: "#f0f9ff", padding: "4px 8px", borderRadius: 4, border: "1px solid #bae6fd" }}>
                     {lang === "ta"
@@ -856,12 +896,12 @@ export function Payments({
                 justifyContent: "center",
                 gap: 8,
                 cursor: isButtonDisabled ? "not-allowed" : "pointer",
-                background: statusState === "unknown" ? "#f59e0b" : "#0284c7",
+                background: "#0284c7",
                 color: "#ffffff",
                 boxShadow: "0 2px 8px rgba(2, 132, 199, 0.25)",
               }}
             >
-              <Icon name={statusState === "unknown" ? "refresh" : "check"} size={18} />
+              <Icon name="check" size={18} />
               <span>{buttonLabel}</span>
             </button>
           </div>
@@ -973,15 +1013,17 @@ export function Payments({
                           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
                             <input
                               type="checkbox"
-                              checked={returnDamaged}
-                              onChange={(e) => setReturnDamaged(e.target.checked)}
+                              checked={restockReturn}
+                              onChange={(e) => setRestockReturn(e.target.checked)}
                             />
-                            <span>{lang === "ta" ? "சேதமடைந்த சரக்கு (விற்பனை சரக்கில் சேர்க்க வேண்டாம்)" : "Damaged goods (do NOT return to sellable stock)"}</span>
+                            <span>{lang === "ta" ? "மீண்டும் விற்கக்கூடியதை சரக்கில் சேர்" : "Put sellable goods back into stock"}</span>
                           </label>
+                          <small>{lang === "ta" ? "கணக்கில் வரவு வைக்கப்படும். பணம் திருப்பப்படாது." : "Credits the customer account. No cash is refunded."}</small>
                           <button
                             type="button"
                             onClick={submitItemReturn}
-                            disabled={saving || !returnReason.trim()}
+                            title={lang === "ta" ? "வாடிக்கையாளர் கணக்கில் வரவு; பணம் திருப்பப்படாது" : "Credits the customer account; no cash is refunded"}
+                            disabled={saving || selectedInvoice.status !== "completed" || !returnItemId || hasPendingOperation("/sales/return-item", token) || !returnReason.trim()}
                             style={{ padding: "8px 14px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}
                           >
                             {saving ? "..." : (lang === "ta" ? "சரக்கு திருப்பத்தை உறுதி செய்" : "Confirm Item Return")}
@@ -993,6 +1035,7 @@ export function Payments({
                           <h4 style={{ margin: "0 0 6px 0", fontSize: 14, fontWeight: 700, color: "#b91c1c" }}>
                             {lang === "ta" ? "முழு பில்லை ரத்து செய் (Cancel Whole Invoice):" : "Cancel Entire Invoice:"}
                           </h4>
+                          {selectedInvoice.amount_paid > 0 && <small>{lang === "ta" ? "பணம் பெற்ற பில்லை இங்கே ரத்து செய்ய முடியாது." : "A paid invoice cannot be cancelled here."}</small>}
                           <div style={{ display: "flex", gap: 8 }}>
                             <input
                               type="text"
@@ -1004,7 +1047,7 @@ export function Payments({
                             <button
                               type="button"
                               onClick={submitSaleCancellation}
-                              disabled={saving || !cancelReason.trim()}
+                              disabled={saving || selectedInvoice.status !== "completed" || selectedInvoice.amount_paid > 0 || !cancelReason.trim()}
                               style={{ padding: "8px 14px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}
                             >
                               {saving ? "..." : (lang === "ta" ? "பில் ரத்து செய்" : "Cancel Bill")}
@@ -1062,7 +1105,9 @@ export function Payments({
                     >
                       <option value="cash">CASH</option>
                       <option value="upi">UPI</option>
-                      <option value="bank">BANK</option>
+                      <option value="bank transfer">BANK TRANSFER</option>
+                      <option value="card">CARD</option>
+                      <option value="other">OTHER</option>
                       <option value="cheque">CHEQUE</option>
                     </select>
                   </div>
@@ -1114,7 +1159,7 @@ export function Payments({
                         {p.notes ? ` • ${p.notes}` : ""}
                       </small>
                     </div>
-                    {isManagerOrOwner ? (
+                    {isManagerOrOwner && p.can_correct ? (
                       <div style={{ display: "flex", gap: 8 }}>
                         <button
                           type="button"
@@ -1122,7 +1167,7 @@ export function Payments({
                           onClick={() => {
                             setEditingPayment(p);
                             setCorrectedAmount(String(p.amount));
-                            setCorrectedMethod(p.payment_method || p.method?.toLowerCase() || "cash");
+                            setCorrectedMethod((p.method || "cash").toLowerCase());
                           }}
                           style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", padding: "6px 10px", borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: "pointer" }}
                         >
