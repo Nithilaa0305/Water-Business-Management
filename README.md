@@ -81,3 +81,5 @@ in the comments. `tests/test_rejections.sql` lists actions that must be refused;
 - The sample users and PINs in `tests/` are for demonstration only.
 - Before going live, create a dedicated database login for the app instead of using the `postgres` superuser.
 - Keep regular backups, because everything lives on one device.
+
+For an offline client installation, see [Windows handover checklist](WINDOWS-HANDOVER.md).

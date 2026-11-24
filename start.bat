@@ -1,25 +1,21 @@
 @echo off
-title Wholesale Billing System
-echo ========================================================
-echo   Wholesale Billing System - All Services Coordinator
-echo ========================================================
-echo.
-echo Starting Backend API (FastAPI on http://localhost:8000)...
-start "Backend API Server" cmd /k "cd /d "%~dp0backend" && .\venv\Scripts\python.exe run.py"
-
-echo Starting Frontend UI (Vite on http://localhost:8443)...
-start "Frontend UI App" cmd /k "cd /d "%~dp0frontend" && npm run dev"
-
-echo.
-echo ========================================================
-echo   Both services started!
-echo   - Backend Docs:  http://localhost:8000/docs
-echo   - Frontend App:  http://localhost:8443/
-echo.
-echo   Demo Login PINs:
-echo   - Owner:     1234
-echo   - Manager:   2222
-echo   - Employee:  3333
-echo ========================================================
+setlocal
+set "HERE=%~dp0"
+if not exist "%HERE%frontend\dist\index.html" goto setup
+if not exist "%HERE%backend\venv\Scripts\python.exe" goto setup
+set "BILLING_HOST=127.0.0.1"
+set "BILLING_PORT=8000"
+powershell -NoProfile -Command "try { if ((Invoke-RestMethod 'http://127.0.0.1:8000/health' -TimeoutSec 2).app -eq 'wholesale-billing') { exit 0 } } catch {}; exit 1" >nul 2>&1
+if errorlevel 1 start "Wholesale Billing Service" /min /D "%HERE%backend" "%HERE%backend\venv\Scripts\python.exe" run.py
+powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(30); while ((Get-Date) -lt $deadline) { try { if ((Invoke-RestMethod 'http://127.0.0.1:8000/health' -TimeoutSec 2).app -eq 'wholesale-billing') { exit 0 } } catch {}; Start-Sleep -Milliseconds 500 }; exit 1"
+if errorlevel 1 goto failed
+start "" "http://127.0.0.1:8000/"
+exit /b 0
+:setup
+echo Billing has not been installed. Ask your installer to finish setup.
 pause
-
+exit /b 1
+:failed
+echo Billing did not start. Ask your installer to check the local database and Billing Service window.
+pause
+exit /b 1
