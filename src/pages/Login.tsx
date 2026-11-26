@@ -40,6 +40,32 @@ export function Login({
   const [setupPinConfirm, setSetupPinConfirm] = useState('');
   const [trialCreds, setTrialCreds] = useState<Array<{ name: string; role: Role; pin: string }> | null>(null);
 
+  const [showPin, setShowPin] = useState(false);
+
+  // Keyboard navigation support: allows typing 0-9, Backspace, Escape, and Enter directly
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if user is typing in an input field (e.g. bootstrap setup)
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (/^[0-9]$/.test(e.key)) {
+        setPin((prev) => (prev.length < 8 ? prev + e.key : prev));
+      } else if (e.key === 'Backspace') {
+        setPin((prev) => prev.slice(0, -1));
+      } else if (e.key === 'Escape') {
+        setPin('');
+      } else if (e.key === 'Enter') {
+        if (selectedStaff && pin.length >= 4 && !loading) {
+          submitPinLogin();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedStaff, pin, loading]);
+
   const loadStatus = async () => {
     setLoadingStatus(true);
     try {
@@ -379,10 +405,35 @@ export function Login({
               <span>{t('pinHint')}</span>
             </div>
 
-            <div className="pin-dots" aria-label={`${pin.length} digits entered`}>
-              {Array.from({ length: 6 }, (_, i) => (
-                <i key={i} className={i < pin.length ? 'filled' : ''} />
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, position: 'relative' }}>
+              <div className="pin-dots" aria-label={`${pin.length} digits entered`}>
+                {Array.from({ length: 6 }, (_, i) => (
+                  <i key={i} className={i < pin.length ? 'filled' : ''} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
+                    {showPin && i < pin.length ? pin[i] : ''}
+                  </i>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                title={showPin ? (lang === 'ta' ? 'மறை' : 'Hide PIN') : (lang === 'ta' ? 'காட்டு' : 'Show PIN')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 8px',
+                  borderRadius: 6
+                }}
+              >
+                <Icon name={showPin ? 'check' : 'search'} size={15} />
+                <span>{showPin ? (lang === 'ta' ? 'மறை' : 'Hide') : (lang === 'ta' ? 'காட்டு' : 'Show')}</span>
+              </button>
             </div>
 
             <div className="keypad">
