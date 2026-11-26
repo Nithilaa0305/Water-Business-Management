@@ -98,6 +98,193 @@ def init_database(engine: Optional[Engine] = None, seed_defaults: bool = True) -
     if seed_defaults:
         seed_default_data(eng)
 
+    # 4. Teammate schema compatibility views
+    create_teammate_compatibility_views(eng)
+
+
+def create_teammate_compatibility_views(eng: Engine) -> None:
+    """Create compatibility views and aliases matching teammate schema and reporting views."""
+    # Drop existing views to allow clean recreation if definition changed
+    drop_views_sql = [
+        "DROP VIEW IF EXISTS v_today;",
+        "DROP VIEW IF EXISTS v_monthly_summary;",
+        "DROP VIEW IF EXISTS v_price_history;",
+        "DROP VIEW IF EXISTS v_activity_timeline;",
+        "DROP VIEW IF EXISTS v_supplier_balances;",
+        "DROP VIEW IF EXISTS v_customer_containers;",
+        "DROP VIEW IF EXISTS v_sale_item_details;",
+        "DROP VIEW IF EXISTS v_sales_list;",
+        "DROP VIEW IF EXISTS v_customer_statement;",
+        "DROP VIEW IF EXISTS v_customer_balances;",
+        "DROP VIEW IF EXISTS v_stock_by_type;",
+        "DROP VIEW IF EXISTS v_batch_queue;",
+        "DROP VIEW IF EXISTS customer_containers;",
+        "DROP VIEW IF EXISTS activity_log;",
+        "DROP VIEW IF EXISTS payments;",
+        "DROP VIEW IF EXISTS sale_items;",
+        "DROP VIEW IF EXISTS sales;",
+        "DROP VIEW IF EXISTS stock_batches;",
+        "DROP VIEW IF EXISTS app_users;",
+        "DROP VIEW IF EXISTS payment_methods;",
+        "DROP VIEW IF EXISTS areas;",
+        "DROP VIEW IF EXISTS categories;",
+        "DROP VIEW IF EXISTS units;"
+    ]
+
+    views_sql = [
+        # Table Aliases / Views
+        """CREATE VIEW IF NOT EXISTS units AS SELECT id AS unit_id, name AS unit_name, 1 AS is_active FROM packaging_units;""",
+        """CREATE VIEW IF NOT EXISTS categories AS SELECT id AS category_id, name AS category_name, 1 AS is_active FROM product_categories;""",
+        """CREATE VIEW IF NOT EXISTS areas AS SELECT id AS area_id, name AS area_name, 1 AS is_active FROM delivery_routes;""",
+        """CREATE VIEW IF NOT EXISTS payment_methods AS SELECT 1 AS method_id, 'Cash' AS method_name, 1 AS is_active UNION SELECT 2, 'Bank Transfer', 1 UNION SELECT 3, 'Cheque', 1 UNION SELECT 4, 'Card', 1 UNION SELECT 5, 'Other', 1;""",
+        """CREATE VIEW IF NOT EXISTS app_users AS SELECT id AS user_id, full_name, username, role AS user_role, password_hash AS pin_hash, is_active, created_at, updated_at FROM users;""",
+        """CREATE VIEW IF NOT EXISTS stock_batches AS SELECT id AS batch_id, batch_number, product_id AS type_id, original_qty AS quantity_received, remaining_qty AS current_quantity, CAST(unit_cost_cents AS REAL) / 100.0 AS buying_price, NULL AS selling_price, received_date, expiry_date, created_at FROM inventory_batches;""",
+        """CREATE VIEW IF NOT EXISTS sales AS SELECT id AS sale_id, invoice_number AS sale_number, customer_id, invoice_date AS sale_date, CAST(subtotal_cents AS REAL) / 100.0 AS subtotal, CAST(discount_cents AS REAL) / 100.0 AS discount, CAST(total_amount_cents AS REAL) / 100.0 AS total, CAST(amount_paid_cents AS REAL) / 100.0 AS amount_paid, CASE WHEN status = 'CANCELLED' THEN 'cancelled' ELSE 'completed' END AS status, notes, created_at FROM sales_invoices;""",
+        """CREATE VIEW IF NOT EXISTS sale_items AS SELECT id AS sale_item_id, invoice_id AS sale_id, product_id AS type_id, NULL AS batch_id, quantity, CAST(unit_price_cents AS REAL) / 100.0 AS unit_price, CAST(cogs_total_cents AS REAL) / (100.0 * CASE WHEN quantity > 0 THEN quantity ELSE 1 END) AS buying_price, 0 AS returned_quantity, CAST(line_total_cents AS REAL) / 100.0 AS line_total FROM sales_invoice_items;""",
+        """CREATE VIEW IF NOT EXISTS payments AS SELECT id AS payment_id, customer_id, payment_date, CAST(amount_cents AS REAL) / 100.0 AS amount, payment_method, notes, created_at FROM customer_payments;""",
+        """CREATE VIEW IF NOT EXISTS activity_log AS SELECT id AS activity_id, user_id, timestamp AS action_time, action_type, COALESCE(reason, action_type) AS description, entity_name AS reference_type, entity_id AS reference_id FROM audit_logs;""",
+        """CREATE VIEW IF NOT EXISTS customer_containers AS SELECT customer_id, 5 AS type_id, running_bottle_balance AS held FROM customer_bottle_ledger;""",
+
+        # Reporting & Queue Views
+        """CREATE VIEW IF NOT EXISTS v_batch_queue AS
+        SELECT b.id AS batch_id, b.batch_number, b.product_id AS type_id,
+               p.name AS item,
+               b.received_date, b.remaining_qty AS current_quantity,
+               CAST(b.unit_cost_cents AS REAL) / 100.0 AS buying_price,
+               CAST(p.default_selling_price_cents AS REAL) / 100.0 AS selling_price,
+               b.expiry_date,
+               ROW_NUMBER() OVER (PARTITION BY b.product_id ORDER BY b.received_date, b.created_at, b.batch_number) AS queue_position,
+               CASE ROW_NUMBER() OVER (PARTITION BY b.product_id ORDER BY b.received_date, b.created_at, b.batch_number)
+                    WHEN 1 THEN 'Current' WHEN 2 THEN 'Next' ELSE 'Waiting' END AS batch_status
+          FROM inventory_batches b
+          JOIN products p ON p.id = b.product_id
+         WHERE b.remaining_qty > 0;""",
+
+        """CREATE VIEW IF NOT EXISTS v_stock_by_type AS
+        SELECT p.id AS type_id, p.name AS product_name, p.bottle_size AS type_name,
+               p.name AS item,
+               p.uom AS unit_name,
+               COALESCE(SUM(b.remaining_qty), 0) AS total_quantity,
+               COUNT(b.id) AS batches_in_stock,
+               (COALESCE(SUM(b.remaining_qty), 0) <= p.min_stock_level) AS low_stock
+          FROM products p
+          LEFT JOIN inventory_batches b ON b.product_id = p.id AND b.remaining_qty > 0
+         GROUP BY p.id, p.name, p.bottle_size, p.uom, p.min_stock_level;""",
+
+        """CREATE VIEW IF NOT EXISTS v_customer_balances AS
+        SELECT c.id AS customer_id, c.name AS customer_name, c.phone, c.area AS area_name,
+               cat.name AS group_name,
+               CAST(c.credit_limit_cents AS REAL) / 100.0 AS credit_limit,
+               CAST(COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents) AS REAL) / 100.0 AS balance,
+               CASE WHEN COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents) > 0 THEN 'Customer owes you'
+                    WHEN COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents) < 0 THEN 'You owe customer'
+                    ELSE 'Settled' END AS balance_note,
+               ABS(CAST(COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents) AS REAL) / 100.0) AS amount,
+               (c.credit_limit_cents > 0 AND COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents) > c.credit_limit_cents) AS over_limit
+          FROM customers c
+          LEFT JOIN customer_categories cat ON cat.id = c.category_id;""",
+
+        """CREATE VIEW IF NOT EXISTS v_customer_statement AS
+        SELECT l.customer_id, c.name AS customer_name, l.date AS entry_time,
+               l.transaction_type AS entry_type, l.notes AS note,
+               CAST(l.debit_cents AS REAL) / 100.0 AS debit,
+               CAST(l.credit_cents AS REAL) / 100.0 AS credit,
+               CAST(l.running_balance_cents AS REAL) / 100.0 AS running_balance,
+               'System' AS entered_by
+          FROM customer_ledger l
+          JOIN customers c ON c.id = l.customer_id
+         ORDER BY c.name, l.date;""",
+
+        """CREATE VIEW IF NOT EXISTS v_sales_list AS
+        SELECT s.id AS sale_id, s.invoice_number AS sale_number, s.invoice_date AS sale_date,
+               c.name AS customer_name,
+               CAST(s.subtotal_cents AS REAL) / 100.0 AS subtotal,
+               CAST(s.discount_cents AS REAL) / 100.0 AS discount,
+               CAST(s.total_amount_cents AS REAL) / 100.0 AS total,
+               CAST(s.amount_paid_cents AS REAL) / 100.0 AS amount_paid,
+               CAST(s.total_amount_cents - s.amount_paid_cents AS REAL) / 100.0 AS due,
+               CASE WHEN s.status = 'CANCELLED' THEN 'cancelled' ELSE 'completed' END AS status,
+               'Admin' AS made_by
+          FROM sales_invoices s
+          JOIN customers c ON c.id = s.customer_id
+         ORDER BY s.created_at DESC;""",
+
+        """CREATE VIEW IF NOT EXISTS v_sale_item_details AS
+        SELECT s.invoice_number AS sale_number, s.invoice_date AS sale_date, c.name AS customer_name,
+               p.name AS item,
+               '' AS batch_number, i.quantity,
+               CAST(i.unit_price_cents AS REAL) / 100.0 AS unit_price,
+               CAST(i.line_total_cents AS REAL) / 100.0 AS line_total,
+               CAST(i.cogs_total_cents AS REAL) / (100.0 * CASE WHEN i.quantity > 0 THEN i.quantity ELSE 1 END) AS buying_price,
+               0 AS returned_quantity, i.id AS sale_item_id
+          FROM sales_invoice_items i
+          JOIN sales_invoices s ON s.id = i.invoice_id
+          JOIN customers c ON c.id = s.customer_id
+          JOIN products p ON p.id = i.product_id
+         ORDER BY s.created_at DESC, p.name;""",
+
+        """CREATE VIEW IF NOT EXISTS v_customer_containers AS
+        SELECT cc.customer_id, c.name AS customer_name, '19 L Returnable Bottle' AS container, cc.running_bottle_balance AS held
+          FROM customer_bottle_ledger cc
+          JOIN customers c ON c.id = cc.customer_id;""",
+
+        """CREATE VIEW IF NOT EXISTS v_supplier_balances AS
+        SELECT s.id AS supplier_id, s.name AS supplier_name,
+               CAST(s.opening_balance_cents AS REAL) / 100.0 AS you_owe
+          FROM suppliers s;""",
+
+        """CREATE VIEW IF NOT EXISTS v_activity_timeline AS
+        SELECT a.timestamp AS action_time, DATE(a.timestamp) AS action_date,
+               a.user_name AS person, a.role AS user_role, a.action_type, COALESCE(a.reason, a.action_type) AS description,
+               a.entity_name AS reference_type, a.entity_id AS reference_id
+          FROM audit_logs a
+         ORDER BY a.timestamp DESC;""",
+
+        """CREATE VIEW IF NOT EXISTS v_price_history AS
+        SELECT h.effective_date AS changed_at, p.name AS item,
+               h.price_type AS price_kind,
+               CAST(h.old_price_cents AS REAL) / 100.0 AS old_price,
+               CAST(h.new_price_cents AS REAL) / 100.0 AS new_price,
+               b.batch_number, 'Admin' AS changed_by_person, h.reason AS note
+          FROM product_price_history h
+          JOIN products p ON p.id = h.product_id
+          LEFT JOIN inventory_batches b ON b.id = h.batch_id
+         ORDER BY h.effective_date DESC;""",
+
+        """CREATE VIEW IF NOT EXISTS v_monthly_summary AS
+        SELECT
+            STRFTIME('%Y-%m', invoice_date) AS month,
+            CAST(SUM(total_amount_cents) AS REAL) / 100.0 AS net_sales,
+            0.0 AS cost_of_goods,
+            CAST(SUM(total_amount_cents) AS REAL) / 100.0 AS gross_profit,
+            0.0 AS expenses_total,
+            CAST(SUM(total_amount_cents) AS REAL) / 100.0 AS net_profit,
+            0.0 AS stock_purchased_value,
+            CAST(SUM(amount_paid_cents) AS REAL) / 100.0 AS cash_collected
+        FROM sales_invoices
+        WHERE status != 'CANCELLED'
+        GROUP BY STRFTIME('%Y-%m', invoice_date);""",
+
+        """CREATE VIEW IF NOT EXISTS v_today AS
+        SELECT
+           COALESCE((SELECT SUM(total_amount_cents) FROM sales_invoices WHERE DATE(created_at) = DATE('now', 'localtime') AND status != 'CANCELLED'), 0) / 100.0 AS sales_today,
+           COALESCE((SELECT SUM(amount_cents) FROM customer_payments WHERE DATE(created_at) = DATE('now', 'localtime')), 0) / 100.0 AS cash_received_today,
+           COALESCE((SELECT SUM(COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents)) FROM customers c WHERE COALESCE((SELECT running_balance_cents FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), c.opening_balance_cents) > 0), 0) / 100.0 AS owed_to_you,
+           (SELECT COUNT(*) FROM products p LEFT JOIN (SELECT product_id, SUM(remaining_qty) AS rem FROM inventory_batches GROUP BY product_id) b ON b.product_id = p.id WHERE COALESCE(b.rem, 0) <= p.min_stock_level) AS low_stock_items;"""
+    ]
+    with eng.connect() as conn:
+        for drop_sql in drop_views_sql:
+            try:
+                conn.execute(text(drop_sql))
+            except Exception:
+                pass
+        for v in views_sql:
+            try:
+                conn.execute(text(v))
+            except Exception as e:
+                logger.warning(f"Note creating compatibility view: {e}")
+        conn.commit()
+
 
 def seed_default_data(engine: Optional[Engine] = None) -> None:
     """Populate default reference categories, default products, units, and admin user."""
