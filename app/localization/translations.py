@@ -1,0 +1,357 @@
+"""Bilingual localization dictionaries for English and Tamil with comprehensive UI coverage."""
+
+TRANSLATIONS = {
+    "en": {
+        # App identity
+        "app_title": "Water Business Manager",
+        "app_subtitle": "Bottled Water & Billing System",
+        
+        # Navigation
+        "nav_dashboard": "Dashboard",
+        "nav_sales": "New Bill / Sales",
+        "nav_stock": "Stock Management",
+        "nav_purchases": "Purchases",
+        "nav_bottles": "19 L Bottles",
+        "nav_customers": "Customers",
+        "nav_credit": "Credit & Payments",
+        "nav_suppliers": "Suppliers",
+        "nav_expenses": "Expenses",
+        "nav_reports": "Reports",
+        "nav_history": "Activity History",
+        "nav_settings": "Settings & Backup",
+
+        # Common Actions & Buttons
+        "btn_new_bill": "+ New Bill",
+        "btn_add_stock": "+ Adjust Stock",
+        "btn_receive_payment": "Receive Payment",
+        "btn_return_empty": "Return Empty Bottles",
+        "btn_refill": "Refill 19L Bottles",
+        "btn_add_expense": "+ Add Expense",
+        "btn_add_customer": "+ Add Customer",
+        "btn_add_supplier": "+ Add Supplier",
+        "btn_add_purchase": "+ Record Purchase",
+        "btn_refresh": "Refresh",
+        "btn_save": "Save",
+        "btn_cancel": "Cancel",
+        "btn_clear": "Clear",
+        "btn_remove": "Remove",
+        "btn_delete": "Delete",
+        "btn_reactivate": "Reactivate",
+        "btn_archive": "Archive",
+        "btn_browse": "Browse Folder...",
+        "btn_open_folder": "Open Folder in Explorer",
+        "btn_save_settings": "Save Settings",
+        "btn_create_backup": "Create Backup Now",
+        "btn_restore_backup": "Restore from File...",
+        "btn_export_excel": "Export to Excel",
+        "btn_prices": "💲 Prices",
+        "customer_prices_title": "Customer Agreed Selling Prices",
+        "price_agreed_badge": "🏷 Agreed Price (Pre-Set)",
+        "price_customer_badge": "🏷 Customer Rate",
+        "price_standard_badge": "🏷 Standard Price",
+        "save_as_agreed_prices": "Update customer's agreed prices with the unit prices on this bill",
+        "btn_save_bill": "Save Bill",
+        "btn_save_print": "Save & Print",
+
+        # Search, Filter & Status
+        "search": "Search:",
+        "search_placeholder": "Search by name, code, phone...",
+        "status": "Status:",
+        "actions": "Actions",
+        "filter_all": "All",
+        "filter_active": "Active Only",
+        "filter_inactive": "Archived / Inactive",
+        "active": "Active",
+        "inactive": "Archived",
+        "posted": "Posted",
+        "cancelled": "Cancelled",
+        "exhausted": "Exhausted",
+
+        # Dashboard
+        "today_sales": "Today's Total Sales",
+        "monthly_revenue": "Monthly Net Revenue",
+        "monthly_profit": "Monthly Net Profit",
+        "customer_credit": "Customer Credit (Receivables)",
+        "customer_advances": "Customer Advances",
+        "inventory_valuation": "Total Inventory Valuation",
+        "full_bottles_19l": "19L Full Bottles",
+        "empty_bottles_19l": "19L Empty Bottles",
+        "customer_bottles_19l": "19L With Customers",
+        "returnable_bottle_balance": "19 L Returnable Bottle Balance:",
+
+        # Sales & Billing
+        "sales_title": "New Bill / Sales Management",
+        "sales_subtitle": "Fast keyboard-friendly invoicing, customer price suggestion, and 19L bottle tracking",
+        "walkin_customer": "🚶 Walk-in Cash",
+        "select_customer": "Select Customer (or Leave Empty for Cash)",
+        "customer_balance": "Customer Balance",
+        "bottles_held": "19L Bottles Held",
+        "add_item": "+ Add Item",
+        "col_product": "Product",
+        "col_unit": "Packaging Unit",
+        "col_qty": "Quantity",
+        "col_price": "Unit Price (Rs.)",
+        "col_discount": "Discount (Rs.)",
+        "col_total": "Total (Rs.)",
+        "delivered_19l": "19L Bottles Delivered",
+        "returned_19l": "19L Empty Bottles Returned",
+        "bottle_deposit": "Bottle Deposit (Rs.)",
+        "subtotal": "Subtotal",
+        "invoice_discount": "Invoice Discount",
+        "delivery_charge": "Delivery Charge",
+        "net_total": "Net Total",
+        "amount_paid": "Amount Paid",
+        "payment_method": "Payment Method",
+        "customer_owes": "Customer owes you",
+        "you_owe_customer": "You owe customer",
+        "account_settled": "Account settled",
+
+        # Customers Page
+        "customers_title": "Customer Accounts & Balances",
+        "customers_subtitle": "Manage customer profiles, credit limits, 19L bottle obligations, and safe archiving",
+
+        # Stock Page
+        "stock_title": "Stock & FIFO Inventory Management",
+        "stock_subtitle": "Traceable batch-based stock, remaining quantities, unit costs, and product management",
+        "tab_fifo_batches": "FIFO Inventory Batches",
+        "tab_products_master": "Products Master List",
+
+        # Purchases Page
+        "purchases_title": "Stock Purchases & Inward Goods",
+        "purchases_subtitle": "Record bulk product purchases, batch creation, and supplier payables",
+
+        # Bottles Page
+        "bottles_title": "19 L Returnable Bottle Lifecycle",
+        "bottles_subtitle": "Track full, empty, refilling, damaged, and customer-held 19L bottles",
+
+        # Credit Page
+        "credit_title": "Customer Credit & Collections",
+        "credit_subtitle": "Aged receivables, overdue invoices, oldest-invoice allocations, and payments",
+
+        # Suppliers Page
+        "suppliers_title": "Supplier Accounts & Payables",
+        "suppliers_subtitle": "Manage water distributors, packaging suppliers, and payables",
+
+        # Expenses Page
+        "expenses_title": "Operating Expenses Management",
+        "expenses_subtitle": "Record electricity, fuel, water treatment, salaries, vehicle repairs, and rent",
+
+        # Reports Page
+        "reports_title": "Business Reports & Financial Analytics",
+        "reports_subtitle": "Real-time P&L, sales journals, aged balances, tax reports, and inventory valuation",
+
+        # History Page
+        "history_title": "System Activity & Audit Trail",
+        "history_subtitle": "Immutable security logs for all financial transactions, stock adjustments, and refilling",
+
+        # Settings Page
+        "settings_title": "System Settings & Data Safety",
+        "settings_subtitle": "Configure business details, invoice prefix, language, and transactional backups",
+        "biz_details": "Business Profile Information",
+        "biz_name": "Business Name:",
+        "address": "Address:",
+        "phone": "Contact Phone:",
+        "email": "Email:",
+        "invoice_prefix": "Invoice Prefix:",
+        "app_language": "Application Language:",
+        "backup_safety": "Transactional Database Backups & Data Safety",
+        "backup_folder": "Backup Storage Folder:",
+        "col_filename": "Filename",
+        "col_size": "Size",
+        "col_datetime": "Date & Time",
+
+        # Safety & Confirmation Dialogs
+        "confirm_remove_title": "Confirm Removal",
+        "confirm_remove_cust": "Are you sure you want to remove customer '{name}'?",
+        "confirm_remove_prod": "Are you sure you want to remove product '{name}'?",
+        "confirm_remove_supp": "Are you sure you want to remove supplier '{name}'?",
+        "confirm_delete_exp": "Are you sure you want to delete this expense record?",
+        "cannot_remove": "Cannot Remove Record",
+        "debt_warning": "Cannot remove customer because they have an outstanding financial balance of {amount}.",
+        "bottle_warning": "Cannot remove customer because they are currently holding {count} 19L bottle(s).",
+        "supplier_debt_warning": "Cannot remove supplier because there is an outstanding payable of {amount}.",
+        "product_stock_warning": "Cannot remove product because there are still {count} units in stock. Please adjust or sell them first.",
+        "archived_msg": "The record has existing transaction history and has been safely Archived (Deactivated) to preserve accounting and tax integrity.",
+        "deleted_msg": "The record has no past transactions and has been permanently deleted.",
+        "backup_success": "Database backup created successfully!\n\nSaved to:\n{path}\n\nFile size: {size} MB",
+        "backup_failed": "Failed to create database backup: {error}",
+        "restore_confirm": "Restoring will replace your current business data with the backup file.\nA safety backup of your current database will be created first.\n\nDo you want to proceed?"
+    },
+
+    "ta": {
+        # App identity
+        "app_title": "குடிநீர் வணிக மேலாளர்",
+        "app_subtitle": "பாட்டில் குடிநீர் & பில்லிங் முறைமை",
+
+        # Navigation
+        "nav_dashboard": "முகப்பு பலகை",
+        "nav_sales": "புதிய பில் / விற்பனை",
+        "nav_stock": "இருப்பு மேலாண்மை",
+        "nav_purchases": "கொள்முதல்",
+        "nav_bottles": "19 லீட்டர் போத்தல்கள்",
+        "nav_customers": "வாடிக்கையாளர்கள்",
+        "nav_credit": "கடன் & கொடுப்பனவுகள்",
+        "nav_suppliers": "வழங்குநர்கள்",
+        "nav_expenses": "செலவுகள்",
+        "nav_reports": "அறிக்கைகள்",
+        "nav_history": "செயல்பாட்டு வரலாறு",
+        "nav_settings": "அமைப்புகள் & காப்புப்பிரதி",
+
+        # Common Actions & Buttons
+        "btn_new_bill": "+ புதிய பில்",
+        "btn_add_stock": "+ இருப்பு சரிசெய்க",
+        "btn_receive_payment": "பணம் பெறுதல்",
+        "btn_return_empty": "வெற்றுக் குடுவை பெறுக",
+        "btn_refill": "19L மறு நிரப்புதல்",
+        "btn_add_expense": "+ செலவு சேர்க்க",
+        "btn_add_customer": "+ வாடிக்கையாளர் சேர்க்க",
+        "btn_add_supplier": "+ வழங்குநர் சேர்க்க",
+        "btn_add_purchase": "+ கொள்முதல் சேர்க்க",
+        "btn_refresh": "புதுப்பிக்க",
+        "btn_save": "சேமிக்க",
+        "btn_cancel": "ரத்து செய்க",
+        "btn_clear": "அழிக்க",
+        "btn_remove": "நீக்கு",
+        "btn_delete": "அழி",
+        "btn_reactivate": "மீண்டும் இயக்கு",
+        "btn_archive": "காப்பகப்படுத்து",
+        "btn_browse": "கோப்புறையைத் தேர்ந்தெடு...",
+        "btn_open_folder": "கோப்புறையைத் திறக்க",
+        "btn_save_settings": "அமைப்புகளைச் சேமிக்க",
+        "btn_create_backup": "காப்புப்பிரதி எடுக்க",
+        "btn_restore_backup": "கோப்பிலிருந்து மீட்டமைக்க...",
+        "btn_export_excel": "எக்செல் ஏற்றுமதி",
+        "btn_prices": "💲 விலைகள்",
+        "customer_prices_title": "வாடிக்கையாளர் ஒப்பந்த விற்பனை விலைகள்",
+        "price_agreed_badge": "🏷 நிர்ணயிக்கப்பட்ட ஒப்பந்த விலை",
+        "price_customer_badge": "🏷 வாடிக்கையாளர் விலை",
+        "price_standard_badge": "🏷 வழக்கமான விலை",
+        "save_as_agreed_prices": "இந்த பில்லின் விலைகளை வாடிக்கையாளரின் ஒப்பந்த விலையாக புதுப்பிக்கவும்",
+        "btn_save_bill": "பில் சேமிக்க",
+        "btn_save_print": "சேமித்து அச்சிடுக",
+
+        # Search, Filter & Status
+        "search": "தேடுக:",
+        "search_placeholder": "பெயர், குறியீடு, தொலைபேசி...",
+        "status": "நிலை:",
+        "actions": "செயல்கள்",
+        "filter_all": "அனைத்தும்",
+        "filter_active": "செயலில் உள்ளவை",
+        "filter_inactive": "முடக்கப்பட்டவை / காப்பகப்படுத்தப்பட்டவை",
+        "active": "செயலில் உள்ளது",
+        "inactive": "காப்பகப்படுத்தப்பட்டது",
+        "posted": "பதிவு செய்யப்பட்டது",
+        "cancelled": "ரத்து செய்யப்பட்டது",
+        "exhausted": "தீர்ந்துவிட்டது",
+
+        # Dashboard
+        "today_sales": "இன்றைய விற்பனை",
+        "monthly_revenue": "மாதாந்திர வருமானம்",
+        "monthly_profit": "மாதாந்திர நிகர லாபம்",
+        "customer_credit": "வாடிக்கையாளர் கடன் நிலுவை",
+        "customer_advances": "வாடிக்கையாளர் முன்பணங்கள்",
+        "inventory_valuation": "இருப்பு மொத்த மதிப்பு",
+        "full_bottles_19l": "19L நிரம்பிய குடுவைகள்",
+        "empty_bottles_19l": "19L வெற்றுக் குடுவைகள்",
+        "customer_bottles_19l": "வாடிக்கையாளர்களிடம் உள்ளவை",
+        "returnable_bottle_balance": "19 L திரும்பப்பெறும் குடுவை இருப்பு:",
+
+        # Sales & Billing
+        "sales_title": "புதிய பில் / விற்பனை மேலாண்மை",
+        "sales_subtitle": "விரைவான விசைப்பலகை பில்லிங், தனிப்பயன் விலை பரிந்துரை, 19L குடுவை கண்காணிப்பு",
+        "walkin_customer": "🚶 நேரடி வாடிக்கையாளர்",
+        "select_customer": "வாடிக்கையாளரைத் தேர்வுசெய்க (ரொக்கத்திற்கு காலியாக விடவும்)",
+        "customer_balance": "வாடிக்கையாளர் நிலுவை",
+        "bottles_held": "வாடிக்கையாளரிடம் உள்ள குடுவைகள்",
+        "add_item": "+ பொருள் சேர்க்க",
+        "col_product": "பொருள்",
+        "col_unit": "பேக்கிங் அலகு",
+        "col_qty": "எண்ணிக்கை",
+        "col_price": "விலை (ரூ.)",
+        "col_discount": "தள்ளுபடி (ரூ.)",
+        "col_total": "மொத்தம் (ரூ.)",
+        "delivered_19l": "19L வழங்கியவை",
+        "returned_19l": "19L திரும்பப் பெற்றவை",
+        "bottle_deposit": "குடுவை வைப்புத்தொகை (ரூ.)",
+        "subtotal": "கூட்டுத்தொகை",
+        "invoice_discount": "பில் தள்ளுபடி",
+        "delivery_charge": "விநியோக கட்டணம்",
+        "net_total": "நிகர மொத்தம்",
+        "amount_paid": "செலுத்திய தொகை",
+        "payment_method": "செலுத்தும் முறை",
+        "customer_owes": "வாடிக்கையாளர் தரவேண்டியது",
+        "you_owe_customer": "வாடிக்கையாளருக்கு தரவேண்டியது",
+        "account_settled": "கணக்கு முடிந்தது",
+
+        # Customers Page
+        "customers_title": "வாடிக்கையாளர் கணக்குகள் & நிலுவைகள்",
+        "customers_subtitle": "வாடிக்கையாளர் விவரங்கள், கடன் வரம்புகள், 19L குடுவைகள், பாதுகாப்பான காப்பகப்படுத்தல்",
+
+        # Stock Page
+        "stock_title": "இருப்பு & FIFO இருப்பு மேலாண்மை",
+        "stock_subtitle": "தொகுதி அடிப்படையிலான இருப்பு, எஞ்சிய அளவுகள், அலகு செலவுகள் மற்றும் மேலாண்மை",
+        "tab_fifo_batches": "FIFO இருப்புத் தொகுதிகள்",
+        "tab_products_master": "பொருட்கள் பட்டியல்",
+
+        # Purchases Page
+        "purchases_title": "பொருட்கள் கொள்முதல் & உள்வருகை",
+        "purchases_subtitle": "மொத்த கொள்முதல், தொகுதி உருவாக்கம் மற்றும் வழங்குநர் கடன்",
+
+        # Bottles Page
+        "bottles_title": "19 L மறுசுழற்சி குடுவை சுழற்சி",
+        "bottles_subtitle": "நிரம்பிய, வெற்று, மறுநிரப்புதல், சேதமடைந்த மற்றும் வாடிக்கையாளர் குடுவைகள்",
+
+        # Credit Page
+        "credit_title": "வாடிக்கையாளர் கடன் & வசூலிப்பு",
+        "credit_subtitle": "முதுமைப்படுத்தப்பட்ட கடன், நிலுவை பில்கள், கட்டண ஒதுக்கீடுகள் மற்றும் ரசீதுகள்",
+
+        # Suppliers Page
+        "suppliers_title": "வழங்குநர் கணக்குகள் & செலுத்த வேண்டியவை",
+        "suppliers_subtitle": "குடிநீர் விநியோகஸ்தர்கள் மற்றும் பேக்கேஜிங் வழங்குநர்கள் கணக்கு",
+
+        # Expenses Page
+        "expenses_title": "இயக்கச் செலவுகள் மேலாண்மை",
+        "expenses_subtitle": "மின்சாரம், எரிபொருள், சுத்திகரிப்பு, சம்பளம், வாகனப் பழுது மற்றும் வாடகை",
+
+        # Reports Page
+        "reports_title": "வணிக அறிக்கைகள் & நிதி பகுப்பாய்வு",
+        "reports_subtitle": "லாப நஷ்ட கணக்கு, விற்பனை இதழ், கடன் அறிக்கைகள் மற்றும் இருப்பு மதிப்பு",
+
+        # History Page
+        "history_title": "கணினி செயல்பாடுகள் & தணிக்கைப் பதிவு",
+        "history_subtitle": "அனைத்து நிதி பரிவர்த்தனைகள், இருப்பு மாற்றங்கள் மற்றும் தணிக்கை பதிவுகள்",
+
+        # Settings Page
+        "settings_title": "அமைப்பு அமைப்புகள் & தரவு பாதுகாப்பு",
+        "settings_subtitle": "வணிக விவரங்கள், பில் முன்னொட்டு, மொழி மற்றும் தரவுத்தள காப்புப்பிரதிகள்",
+        "biz_details": "வணிக சுயவிவர விவரங்கள்",
+        "biz_name": "வணிகப் பெயர்:",
+        "address": "முகவரி:",
+        "phone": "தொலைபேசி எண்:",
+        "email": "மின்னஞ்சல்:",
+        "invoice_prefix": "பில் முன்னொட்டு:",
+        "app_language": "பயன்பாட்டு மொழி:",
+        "backup_safety": "தரவுத்தள காப்புப்பிரதி & தரவு பாதுகாப்பு",
+        "backup_folder": "காப்புப்பிரதி சேமிக்கும் கோப்புறை:",
+        "col_filename": "கோப்புப் பெயர்",
+        "col_size": "அளவு",
+        "col_datetime": "தேதி & நேரம்",
+
+        # Safety & Confirmation Dialogs
+        "confirm_remove_title": "நீக்குவதை உறுதிசெய்க",
+        "confirm_remove_cust": "'{name}' என்ற வாடிக்கையாளரை நிச்சயமாக நீக்க விரும்புகிறீர்களா?",
+        "confirm_remove_prod": "'{name}' என்ற பொருளை நிச்சயமாக நீக்க விரும்புகிறீர்களா?",
+        "confirm_remove_supp": "'{name}' என்ற வழங்குநரை நிச்சயமாக நீக்க விரும்புகிறீர்களா?",
+        "confirm_delete_exp": "இந்த செலவுப் பதிவை நிச்சயமாக அழிக்க விரும்புகிறீர்களா?",
+        "cannot_remove": "நீக்க முடியாது",
+        "debt_warning": "வாடிக்கையாளர் {amount} நிதி நிலுவைத் தொகை வைத்துள்ளதால் நீக்க முடியாது.",
+        "bottle_warning": "வாடிக்கையாளரிடம் {count} 19L குடுவைகள் உள்ளதால் நீக்க முடியாது.",
+        "supplier_debt_warning": "வழங்குநருக்கு {amount} கடன் செலுத்த வேண்டியுள்ளதால் நீக்க முடியாது.",
+        "product_stock_warning": "பொருளின் இருப்பு {count} அலகுகள் உள்ளதால் நீக்க முடியாது. முதலில் அவற்றை சரிசெய்யவும்.",
+        "archived_msg": "பதிவில் பழைய பரிவர்த்தனைகள் உள்ளதால், கணக்கு மற்றும் வரி பாதுகாப்பிற்காக வெற்றிகரமாக காப்பகப்படுத்தப்பட்டது (முடக்கப்பட்டது).",
+        "deleted_msg": "பழைய பரிவர்த்தனைகள் ஏதும் இல்லாததால் பதிவு நிரந்தரமாக நீக்கப்பட்டது.",
+        "backup_success": "தரவுத்தள காப்புப்பிரதி வெற்றிகரமாக உருவாக்கப்பட்டது!\n\nசேமிக்கப்பட்ட இடம்:\n{path}\n\nகோப்பு அளவு: {size} MB",
+        "backup_failed": "காப்புப்பிரதி உருவாக்குவதில் தோல்வி: {error}",
+        "restore_confirm": "காப்புப்பிரதியை மீட்டமைப்பது உங்கள் தற்போதைய வணிகத் தரவை மாற்றும்.\nபாதுகாப்பிற்காக தற்போதைய தரவுத்தளம் முதலில் காப்புப் பிரதி எடுக்கப்படும்.\n\nதொடர விரும்புகிறீர்களா?"
+    }
+}
