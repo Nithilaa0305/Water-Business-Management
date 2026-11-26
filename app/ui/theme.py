@@ -1,27 +1,46 @@
-"""Application theme and modern Qt stylesheet."""
+"""Application theme, high-contrast light palette, and modern Qt stylesheet."""
+
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QPalette, QColor
 
 NAVY_BLUE = "#0F172A"
 WATER_BLUE = "#0284C7"
 WATER_BLUE_HOVER = "#0369A1"
 LIGHT_BG = "#F8FAFC"
 CARD_BG = "#FFFFFF"
-BORDER_COLOR = "#E2E8F0"
-TEXT_DARK = "#1E293B"
-TEXT_MUTED = "#64748B"
+BORDER_COLOR = "#CBD5E1"
+TEXT_DARK = "#0F172A"
+TEXT_MUTED = "#475569"
 SUCCESS_GREEN = "#16A34A"
 WARNING_AMBER = "#D97706"
 DANGER_RED = "#DC2626"
 
 STYLESHEET = f"""
+/* Universal Global Typography & Colors */
+QWidget {{
+    font-family: "Segoe UI", "Nirmala UI", sans-serif;
+    color: {TEXT_DARK};
+    font-size: 13px;
+}}
+
 QMainWindow, QDialog {{
     background-color: {LIGHT_BG};
-    font-family: "Segoe UI", "Nirmala UI", sans-serif;
-    font-size: 13px;
     color: {TEXT_DARK};
 }}
 
-QWidget {{
-    font-family: "Segoe UI", "Nirmala UI", sans-serif;
+/* Universal Labels - Force Dark Slate Text everywhere */
+QLabel {{
+    color: {TEXT_DARK};
+    background-color: transparent;
+}}
+
+QDialog QLabel {{
+    color: {TEXT_DARK};
+}}
+
+QFormLayout QLabel {{
+    color: {TEXT_DARK};
+    font-weight: 600;
 }}
 
 /* Sidebar */
@@ -78,12 +97,9 @@ QWidget {{
     border-radius: 6px;
 }}
 
-/* Cards */
-.Card {{
-    background-color: {CARD_BG};
-    border: 1px solid {BORDER_COLOR};
-    border-radius: 8px;
-    padding: 16px;
+/* Cards & Frames */
+.Card, QFrame {{
+    color: {TEXT_DARK};
 }}
 
 /* Buttons */
@@ -118,6 +134,7 @@ QPushButton#SecondaryButton {{
 
 QPushButton#SecondaryButton:hover {{
     background-color: #F1F5F9;
+    border-color: #94A3B8;
 }}
 
 QPushButton#DangerButton {{
@@ -141,15 +158,50 @@ QPushButton#SuccessButton:hover {{
 /* Form inputs */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QDateEdit, QTextEdit {{
     background-color: #FFFFFF;
-    border: 1px solid {BORDER_COLOR};
+    border: 1.5px solid {BORDER_COLOR};
     border-radius: 6px;
     padding: 6px 10px;
     font-size: 13px;
     color: {TEXT_DARK};
+    selection-background-color: #0284C7;
+    selection-color: #FFFFFF;
 }}
 
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QDateEdit:focus, QTextEdit:focus {{
     border: 1.5px solid {WATER_BLUE};
+    background-color: #FFFFFF;
+}}
+
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{
+    background-color: #F1F5F9;
+    color: {TEXT_MUTED};
+    border: 1px solid #E2E8F0;
+}}
+
+/* QComboBox Dropdown & Popup Item View */
+QComboBox {{
+    background-color: #FFFFFF;
+    color: {TEXT_DARK};
+    border: 1.5px solid {BORDER_COLOR};
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 20px;
+}}
+
+QComboBox QAbstractItemView {{
+    background-color: #FFFFFF;
+    color: {TEXT_DARK};
+    border: 1px solid {BORDER_COLOR};
+    selection-background-color: #0284C7;
+    selection-color: #FFFFFF;
+    padding: 4px;
+}}
+
+/* Checkbox & Radio */
+QCheckBox, QRadioButton {{
+    color: {TEXT_DARK};
+    font-size: 13px;
+    font-weight: 500;
 }}
 
 /* Table view */
@@ -160,6 +212,7 @@ QTableWidget, QTableView {{
     gridline-color: #F1F5F9;
     selection-background-color: #E0F2FE;
     selection-color: {TEXT_DARK};
+    color: {TEXT_DARK};
     font-size: 13px;
 }}
 
@@ -167,8 +220,14 @@ QHeaderView::section {{
     background-color: #F8FAFC;
     color: {TEXT_MUTED};
     padding: 8px;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 12px;
+    border: none;
+    border-bottom: 2px solid {BORDER_COLOR};
+}}
+
+QTableCornerButton::section {{
+    background-color: #F8FAFC;
     border: none;
     border-bottom: 2px solid {BORDER_COLOR};
 }}
@@ -190,7 +249,7 @@ QScrollBar::handle:vertical:hover {{
     background: #94A3B8;
 }}
 
-/* Modern Table Action Buttons */
+/* Action Buttons */
 QPushButton.ActionBtnEdit {{
     background-color: #F1F5F9;
     color: #0F172A;
@@ -263,3 +322,26 @@ QPushButton.ActionBtnPrice:hover {{
     border-color: #86EFAC;
 }}
 """
+
+
+def apply_app_theme(app: QApplication) -> None:
+    """
+    Apply a forced high-contrast light palette and unified stylesheet to QApplication.
+    Prevents Windows Dark Mode from causing white-on-white text in dialogs and inputs.
+    """
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#F8FAFC"))
+    palette.setColor(QPalette.WindowText, QColor("#0F172A"))
+    palette.setColor(QPalette.Base, QColor("#FFFFFF"))
+    palette.setColor(QPalette.AlternateBase, QColor("#F1F5F9"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#0F172A"))
+    palette.setColor(QPalette.ToolTipText, QColor("#FFFFFF"))
+    palette.setColor(QPalette.Text, QColor("#0F172A"))
+    palette.setColor(QPalette.Button, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ButtonText, QColor("#0F172A"))
+    palette.setColor(QPalette.BrightText, QColor("#DC2626"))
+    palette.setColor(QPalette.Link, QColor("#0284C7"))
+    palette.setColor(QPalette.Highlight, QColor("#0284C7"))
+    palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+    app.setPalette(palette)
+    app.setStyleSheet(STYLESHEET)

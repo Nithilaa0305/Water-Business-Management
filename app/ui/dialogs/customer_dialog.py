@@ -16,10 +16,53 @@ class CustomerDialog(QDialog):
         super().__init__(parent)
         self.customer_id = customer_id
         self.setWindowTitle("Edit Customer" if customer_id else "Add New Customer")
-        self.setFixedSize(480, 440)
+        self.resize(520, 560)
+        self.setMinimumSize(480, 520)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {
+                border-color: #0284C7;
+                background-color: #FFFFFF;
+            }
+            QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+                background-color: #F1F5F9;
+                color: #64748B;
+                border: 1px solid #E2E8F0;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                selection-background-color: #0284C7;
+                selection-color: #FFFFFF;
+            }
+        """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         form = QFormLayout()
+        form.setSpacing(10)
+
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet("color: #0F172A; font-weight: 600; font-size: 13px;")
+            return l
 
         self.txt_name = QLineEdit()
         self.txt_biz = QLineEdit()
@@ -46,16 +89,16 @@ class CustomerDialog(QDialog):
         if customer_id:
             self.spin_opening_balance.setEnabled(False)  # Opening balance locked once created
 
-        form.addRow("Customer Name*:", self.txt_name)
-        form.addRow("Business Name:", self.txt_biz)
-        form.addRow("Phone Number*:", self.txt_phone)
-        form.addRow("Alt Phone:", self.txt_alt_phone)
-        form.addRow("Area / City:", self.txt_area)
-        form.addRow("Customer Category:", self.cmb_category)
-        form.addRow("Delivery Route:", self.cmb_route)
-        form.addRow("Credit Limit:", self.spin_credit_limit)
-        form.addRow("Credit Period:", self.spin_credit_period)
-        form.addRow("Opening Balance:", self.spin_opening_balance)
+        form.addRow(_lbl("Customer Name*:"), self.txt_name)
+        form.addRow(_lbl("Business Name:"), self.txt_biz)
+        form.addRow(_lbl("Phone Number*:"), self.txt_phone)
+        form.addRow(_lbl("Alt Phone:"), self.txt_alt_phone)
+        form.addRow(_lbl("Area / City:"), self.txt_area)
+        form.addRow(_lbl("Customer Category:"), self.cmb_category)
+        form.addRow(_lbl("Delivery Route:"), self.cmb_route)
+        form.addRow(_lbl("Credit Limit:"), self.spin_credit_limit)
+        form.addRow(_lbl("Credit Period:"), self.spin_credit_period)
+        form.addRow(_lbl("Opening Balance:"), self.spin_opening_balance)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()

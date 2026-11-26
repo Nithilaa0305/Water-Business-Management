@@ -25,6 +25,24 @@ class CustomerPriceDialog(QDialog):
         self.setWindowTitle(t("customer_prices_title", "Customer Agreed Selling Prices"))
         self.setMinimumSize(880, 520)
         self.resize(920, 560)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+            }
+            QTableWidget {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QHeaderView::section {
+                background-color: #F8FAFC;
+                color: #0F172A;
+                font-weight: 600;
+            }
+        """)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)

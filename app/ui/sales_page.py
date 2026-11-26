@@ -51,7 +51,7 @@ class SalesPage(QWidget):
 
         # Customer selection bar
         cust_bar = QFrame()
-        cust_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;")
+        cust_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; color: #0F172A;")
         cust_vlayout = QVBoxLayout(cust_bar)
         cust_vlayout.setContentsMargins(10, 8, 10, 8)
         cust_vlayout.setSpacing(8)
@@ -119,7 +119,7 @@ class SalesPage(QWidget):
 
         # Item Entry Row
         item_bar = QFrame()
-        item_bar.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;")
+        item_bar.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; color: #0F172A;")
         item_layout = QHBoxLayout(item_bar)
         item_layout.setContentsMargins(6, 6, 6, 6)
         item_layout.setSpacing(10)
@@ -190,7 +190,7 @@ class SalesPage(QWidget):
 
         # Left: 19L bottle exchange controls
         bottle_box = QFrame()
-        bottle_box.setStyleSheet("background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; padding: 12px;")
+        bottle_box.setStyleSheet("background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; padding: 12px; color: #0F172A;")
         b_box_layout = QVBoxLayout(bottle_box)
 
         lbl_b_title = QLabel("19 L Returnable Bottles on this Bill:")
@@ -210,13 +210,13 @@ class SalesPage(QWidget):
 
         # Right: Totals and Payment
         totals_box = QFrame()
-        totals_box.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px;")
+        totals_box.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px; color: #0F172A;")
         tot_layout = QVBoxLayout(totals_box)
         tot_layout.setSpacing(8)
 
         # Subtotal
         self.lbl_subtotal = QLabel("Subtotal: Rs. 0.00")
-        self.lbl_subtotal.setStyleSheet("font-size: 14px; font-weight: 500;")
+        self.lbl_subtotal.setStyleSheet("font-size: 14px; font-weight: 500; color: #0F172A;")
         tot_layout.addWidget(self.lbl_subtotal)
 
         # Invoice discount

@@ -14,6 +14,7 @@ from app.config.settings import APP_NAME, APP_VERSION, APP_AUTHOR, DB_PATH
 from app.database.connection import get_engine, check_database_integrity
 from app.database.migrations.migration_manager import init_database
 from app.ui.main_window import MainWindow
+from app.ui.theme import apply_app_theme
 from app.utilities.logger import logger
 
 
@@ -41,6 +42,9 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(APP_AUTHOR)
+
+    # Apply unified light theme and high-contrast palette across entire application
+    apply_app_theme(app)
 
     # Single instance check
     instance_server = ensure_single_instance()

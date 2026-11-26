@@ -45,7 +45,7 @@ class SettingsPage(QWidget):
 
         # Business Profile Form
         form_frame = QFrame()
-        form_frame.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px;")
+        form_frame.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; color: #0F172A;")
         self.form = QFormLayout(form_frame)
         self.form.setSpacing(12)
 
@@ -60,11 +60,17 @@ class SettingsPage(QWidget):
         self.cmb_lang.addItem("தமிழ் (Tamil)", "ta")
 
         self.lbl_biz_name = QLabel(t("biz_name", "Business Name:"))
+        self.lbl_biz_name.setStyleSheet("color: #0F172A; font-weight: 600;")
         self.lbl_address = QLabel(t("address", "Address:"))
+        self.lbl_address.setStyleSheet("color: #0F172A; font-weight: 600;")
         self.lbl_phone = QLabel(t("phone", "Contact Phone:"))
+        self.lbl_phone.setStyleSheet("color: #0F172A; font-weight: 600;")
         self.lbl_email = QLabel(t("email", "Email:"))
+        self.lbl_email.setStyleSheet("color: #0F172A; font-weight: 600;")
         self.lbl_prefix = QLabel(t("invoice_prefix", "Invoice Prefix:"))
+        self.lbl_prefix.setStyleSheet("color: #0F172A; font-weight: 600;")
         self.lbl_lang = QLabel(t("app_language", "Application Language:"))
+        self.lbl_lang.setStyleSheet("color: #0F172A; font-weight: 600;")
 
         self.form.addRow(self.lbl_biz_name, self.txt_biz_name)
         self.form.addRow(self.lbl_address, self.txt_address)
@@ -76,7 +82,7 @@ class SettingsPage(QWidget):
 
         # Backup & Safety Section
         backup_frame = QFrame()
-        backup_frame.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px;")
+        backup_frame.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; color: #0F172A;")
         b_layout = QVBoxLayout(backup_frame)
         b_layout.setSpacing(12)
 

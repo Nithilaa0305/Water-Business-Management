@@ -17,8 +17,32 @@ class SetupWizardDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Water Business Manager - First Time Setup")
-        self.setFixedSize(540, 480)
+        self.resize(560, 520)
+        self.setMinimumSize(520, 480)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)  # Must complete or cancel
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QComboBox {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border-color: #0284C7;
+                background-color: #FFFFFF;
+            }
+        """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -30,12 +54,17 @@ class SetupWizardDialog(QDialog):
         layout.addWidget(header)
 
         sub = QLabel("Please set up your business details and owner credentials.")
-        sub.setStyleSheet("color: #64748B; font-size: 13px;")
+        sub.setStyleSheet("color: #64748B; font-size: 13px; font-weight: normal;")
         layout.addWidget(sub)
 
         # Form
         form = QFormLayout()
         form.setSpacing(12)
+
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet("color: #0F172A; font-weight: 600; font-size: 13px;")
+            return l
 
         self.txt_business_name = QLineEdit("Pure Life Bottled Water")
         self.txt_address = QLineEdit("123 Galle Road, Colombo 03")
@@ -52,14 +81,14 @@ class SetupWizardDialog(QDialog):
         self.txt_pin.setEchoMode(QLineEdit.Password)
         self.txt_pin.setMaxLength(6)
 
-        form.addRow("Business Name*:", self.txt_business_name)
-        form.addRow("Business Address:", self.txt_address)
-        form.addRow("Contact Phone*:", self.txt_phone)
-        form.addRow("Email Address:", self.txt_email)
-        form.addRow("Invoice Prefix:", self.txt_prefix)
-        form.addRow("Language:", self.cmb_lang)
-        form.addRow("Owner Name*:", self.txt_owner_name)
-        form.addRow("Owner 4-Digit PIN*:", self.txt_pin)
+        form.addRow(_lbl("Business Name*:"), self.txt_business_name)
+        form.addRow(_lbl("Business Address:"), self.txt_address)
+        form.addRow(_lbl("Contact Phone*:"), self.txt_phone)
+        form.addRow(_lbl("Email Address:"), self.txt_email)
+        form.addRow(_lbl("Invoice Prefix:"), self.txt_prefix)
+        form.addRow(_lbl("Language:"), self.cmb_lang)
+        form.addRow(_lbl("Owner Name*:"), self.txt_owner_name)
+        form.addRow(_lbl("Owner 4-Digit PIN*:"), self.txt_pin)
 
         layout.addLayout(form)
 

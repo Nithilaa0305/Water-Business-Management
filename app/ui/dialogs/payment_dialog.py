@@ -15,10 +15,48 @@ class PaymentDialog(QDialog):
     def __init__(self, parent=None, default_customer_id=None):
         super().__init__(parent)
         self.setWindowTitle("Receive Customer Payment")
-        self.setFixedSize(450, 360)
+        self.resize(480, 420)
+        self.setMinimumSize(440, 380)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QComboBox, QDoubleSpinBox {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
+                border-color: #0284C7;
+                background-color: #FFFFFF;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                selection-background-color: #0284C7;
+                selection-color: #FFFFFF;
+            }
+        """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         form = QFormLayout()
+        form.setSpacing(10)
+
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet("color: #0F172A; font-weight: 600; font-size: 13px;")
+            return l
 
         self.cmb_customer = QComboBox()
         self.lbl_balance = QLabel("-")
@@ -37,12 +75,12 @@ class PaymentDialog(QDialog):
 
         self.txt_notes = QLineEdit()
 
-        form.addRow("Customer*:", self.cmb_customer)
-        form.addRow("Current Balance:", self.lbl_balance)
-        form.addRow("Payment Amount*:", self.spin_amount)
-        form.addRow("Payment Method:", self.cmb_method)
-        form.addRow("Reference No:", self.txt_ref)
-        form.addRow("Notes:", self.txt_notes)
+        form.addRow(_lbl("Customer*:"), self.cmb_customer)
+        form.addRow(_lbl("Current Balance:"), self.lbl_balance)
+        form.addRow(_lbl("Payment Amount*:"), self.spin_amount)
+        form.addRow(_lbl("Payment Method:"), self.cmb_method)
+        form.addRow(_lbl("Reference No:"), self.txt_ref)
+        form.addRow(_lbl("Notes:"), self.txt_notes)
         layout.addLayout(form)
 
         # Buttons

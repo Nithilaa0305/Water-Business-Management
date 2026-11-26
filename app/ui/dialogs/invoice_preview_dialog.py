@@ -19,6 +19,19 @@ class InvoicePreviewDialog(QDialog):
         self.invoice_id = invoice_id
         self.setWindowTitle("Invoice Preview & Print")
         self.resize(750, 800)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+            }
+            QComboBox {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+        """)
 
         layout = QVBoxLayout(self)
 
@@ -51,7 +64,7 @@ class InvoicePreviewDialog(QDialog):
 
         # Preview Browser
         self.browser = QTextBrowser()
-        self.browser.setStyleSheet("background-color: white; border: 1px solid #CBD5E1;")
+        self.browser.setStyleSheet("background-color: white; color: #0F172A; border: 1px solid #CBD5E1;")
         layout.addWidget(self.browser)
 
         self.render_preview()

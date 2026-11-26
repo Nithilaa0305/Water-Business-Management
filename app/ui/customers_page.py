@@ -47,17 +47,20 @@ class CustomersPage(QWidget):
 
         # Search & Filter Bar
         search_bar = QFrame()
-        search_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;")
+        search_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; color: #0F172A;")
         s_layout = QHBoxLayout(search_bar)
         
         self.lbl_search = QLabel("Search:")
+        self.lbl_search.setStyleSheet("color: #0F172A; font-weight: 600;")
         s_layout.addWidget(self.lbl_search)
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("Search by name, phone, code, or area...")
         self.txt_search.textChanged.connect(self.load_customers)
         s_layout.addWidget(self.txt_search)
 
-        s_layout.addWidget(QLabel("Status:"))
+        lbl_status = QLabel("Status:")
+        lbl_status.setStyleSheet("color: #0F172A; font-weight: 600;")
+        s_layout.addWidget(lbl_status)
         self.cmb_status_filter = QComboBox()
         self.cmb_status_filter.addItem("Active Customers Only", "ACTIVE")
         self.cmb_status_filter.addItem("Archived / Inactive Customers", "INACTIVE")

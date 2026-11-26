@@ -14,10 +14,48 @@ class BottleReturnDialog(QDialog):
     def __init__(self, parent=None, default_customer_id=None):
         super().__init__(parent)
         self.setWindowTitle("Return Empty 19 L Bottles")
-        self.setFixedSize(450, 300)
+        self.resize(480, 360)
+        self.setMinimumSize(440, 320)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QComboBox, QSpinBox {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+                border-color: #0284C7;
+                background-color: #FFFFFF;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                selection-background-color: #0284C7;
+                selection-color: #FFFFFF;
+            }
+        """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         form = QFormLayout()
+        form.setSpacing(10)
+
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet("color: #0F172A; font-weight: 600; font-size: 13px;")
+            return l
 
         self.cmb_customer = QComboBox()
         self.lbl_held = QLabel("0 bottles")
@@ -30,10 +68,10 @@ class BottleReturnDialog(QDialog):
         self.txt_reason = QLineEdit()
         self.txt_reason.setPlaceholderText("Optional notes")
 
-        form.addRow("Customer*:", self.cmb_customer)
-        form.addRow("Currently Held by Customer:", self.lbl_held)
-        form.addRow("Empty Bottles Returned*:", self.spin_qty)
-        form.addRow("Notes:", self.txt_reason)
+        form.addRow(_lbl("Customer*:"), self.cmb_customer)
+        form.addRow(_lbl("Currently Held by Customer:"), self.lbl_held)
+        form.addRow(_lbl("Empty Bottles Returned*:"), self.spin_qty)
+        form.addRow(_lbl("Notes:"), self.txt_reason)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()

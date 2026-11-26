@@ -15,10 +15,42 @@ class RefillDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Refill 19 L Bottles")
-        self.setFixedSize(500, 440)
+        self.resize(520, 520)
+        self.setMinimumSize(480, 480)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QSpinBox, QDoubleSpinBox {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                border-color: #0284C7;
+                background-color: #FFFFFF;
+            }
+        """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         form = QFormLayout()
+        form.setSpacing(10)
+
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet("color: #0F172A; font-weight: 600; font-size: 13px;")
+            return l
 
         self.lbl_empty_avail = QLabel("0 bottles")
         self.lbl_empty_avail.setStyleSheet("font-weight: bold; color: #0284C7;")
@@ -59,15 +91,15 @@ class RefillDialog(QDialog):
 
         self.txt_notes = QLineEdit()
 
-        form.addRow("Available Empty in Warehouse:", self.lbl_empty_avail)
-        form.addRow("Empty Bottles Selected*:", self.spin_selected)
-        form.addRow("Successfully Refilled*:", self.spin_refilled)
-        form.addRow("Damaged / Rejected*:", self.spin_damaged)
-        form.addRow("Water Treatment Cost:", self.spin_water)
-        form.addRow("Caps & Seals Cost:", self.spin_caps)
-        form.addRow("Direct Labour Cost:", self.spin_labour)
-        form.addRow("Calculated Unit Cost:", self.lbl_unit_cost)
-        form.addRow("Notes:", self.txt_notes)
+        form.addRow(_lbl("Available Empty in Warehouse:"), self.lbl_empty_avail)
+        form.addRow(_lbl("Empty Bottles Selected*:"), self.spin_selected)
+        form.addRow(_lbl("Successfully Refilled*:"), self.spin_refilled)
+        form.addRow(_lbl("Damaged / Rejected*:"), self.spin_damaged)
+        form.addRow(_lbl("Water Treatment Cost:"), self.spin_water)
+        form.addRow(_lbl("Caps & Seals Cost:"), self.spin_caps)
+        form.addRow(_lbl("Direct Labour Cost:"), self.spin_labour)
+        form.addRow(_lbl("Calculated Unit Cost:"), self.lbl_unit_cost)
+        form.addRow(_lbl("Notes:"), self.txt_notes)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()

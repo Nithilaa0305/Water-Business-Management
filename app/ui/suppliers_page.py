@@ -19,9 +19,39 @@ class SupplierDialog(QDialog):
     def __init__(self, parent=None, supplier_id=None):
         super().__init__(parent)
         self.setWindowTitle(t("btn_add_supplier", "Add Supplier"))
-        self.setFixedSize(450, 320)
+        self.resize(480, 420)
+        self.setMinimumSize(440, 360)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-weight: 600;
+            }
+            QLineEdit {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+            QLineEdit:focus {
+                border-color: #0284C7;
+            }
+        """)
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         form = QFormLayout()
+        form.setSpacing(12)
+
+        def _lbl(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color: #0F172A; font-weight: 600; font-size: 13px;")
+            return lbl
 
         self.txt_name = QLineEdit()
         self.txt_contact = QLineEdit()
@@ -29,11 +59,11 @@ class SupplierDialog(QDialog):
         self.txt_email = QLineEdit()
         self.txt_addr = QLineEdit()
 
-        form.addRow("Supplier Name*:", self.txt_name)
-        form.addRow("Contact Person:", self.txt_contact)
-        form.addRow("Phone Number*:", self.txt_phone)
-        form.addRow("Email:", self.txt_email)
-        form.addRow("Address:", self.txt_addr)
+        form.addRow(_lbl("Supplier Name*:"), self.txt_name)
+        form.addRow(_lbl("Contact Person:"), self.txt_contact)
+        form.addRow(_lbl("Phone Number*:"), self.txt_phone)
+        form.addRow(_lbl("Email:"), self.txt_email)
+        form.addRow(_lbl("Address:"), self.txt_addr)
         layout.addLayout(form)
 
         btns = QHBoxLayout()
@@ -110,10 +140,11 @@ class SuppliersPage(QWidget):
 
         # Filter bar
         filter_bar = QFrame()
-        filter_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;")
+        filter_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; color: #0F172A;")
         f_layout = QHBoxLayout(filter_bar)
         
         self.lbl_filter = QLabel(t("status", "Status:"))
+        self.lbl_filter.setStyleSheet("color: #0F172A; font-weight: 600;")
         f_layout.addWidget(self.lbl_filter)
         self.cmb_status_filter = QComboBox()
         self.cmb_status_filter.addItem(t("filter_active", "Active Suppliers Only"), "ACTIVE")

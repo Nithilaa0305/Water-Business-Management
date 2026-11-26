@@ -55,9 +55,11 @@ class StockPage(QWidget):
 
         # Filter bar
         filter_bar = QFrame()
-        filter_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;")
+        filter_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; color: #0F172A;")
         f_layout = QHBoxLayout(filter_bar)
-        f_layout.addWidget(QLabel("Filter by Product:"))
+        lbl_filter_prod = QLabel("Filter by Product:")
+        lbl_filter_prod.setStyleSheet("color: #0F172A; font-weight: 600;")
+        f_layout.addWidget(lbl_filter_prod)
         self.cmb_filter_product = QComboBox()
         self.cmb_filter_product.addItem("All Products", None)
         self.cmb_filter_product.currentIndexChanged.connect(self.load_batches_data)
