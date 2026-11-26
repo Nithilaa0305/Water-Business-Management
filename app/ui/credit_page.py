@@ -140,4 +140,13 @@ class CreditPage(QWidget):
         self.lbl_sub.setText(t("credit_subtitle", "Accounts receivable, payment allocations, credit aging, and overdue debt tracking"))
         self.btn_pay.setText(t("btn_receive_payment", "+ Receive Payment"))
         self.btn_refresh.setText(t("btn_refresh", "Refresh"))
+        if hasattr(self, 'card_current'):
+            self.card_current.title_label.setText(t("credit_current", "Current (Not Due)"))
+            self.card_d1_30.title_label.setText(t("credit_1_30", "1–30 Days Overdue"))
+            self.card_d31_60.title_label.setText(t("credit_31_60", "31–60 Days Overdue"))
+            self.card_over60.title_label.setText(t("credit_over60", ">60 Days Overdue"))
+        if hasattr(self, 'table_credit'):
+            self.table_credit.setHorizontalHeaderLabels([
+                "Customer Code", "Customer Name", "Total Debt", "Current Due", "Overdue Amount", t("actions", "Action")
+            ])
         self.load_credit_data()

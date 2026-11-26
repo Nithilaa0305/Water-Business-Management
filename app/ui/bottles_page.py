@@ -176,4 +176,21 @@ class BottlesPage(QWidget):
         self.btn_return.setText(t("btn_return_empty", "Return Empty Bottles"))
         self.btn_refill.setText(t("btn_refill", "Refill 19L Bottles"))
         self.btn_refresh.setText(t("btn_refresh", "Refresh"))
+        if hasattr(self, 'card_full'):
+            self.card_full.title_label.setText(t("card_full_bottles", "1. Full Bottles Available"))
+            self.card_empty.title_label.setText(t("card_empty_bottles", "2. Empty in Warehouse"))
+            self.card_customer.title_label.setText(t("card_cust_bottles", "3. Held by Customers"))
+            self.card_damaged.title_label.setText(t("card_damaged_bottles", "4. Damaged / Rejected"))
+        if hasattr(self, 'table_customers'):
+            self.table_customers.setHorizontalHeaderLabels([
+                "Customer Code",
+                "Customer Name",
+                t("phone", "Phone"),
+                t("bottles_held", "Total Held"),
+                t("bottle_aging_0_7", "0-7 Days"),
+                t("bottle_aging_8_30", "8-30 Days"),
+                t("bottle_aging_31_60", "31-60 Days"),
+                t("bottle_aging_60_plus", ">60 Days Overdue"),
+                t("actions", "Actions")
+            ])
         self.load_bottle_data()

@@ -176,6 +176,8 @@ class DashboardPage(QWidget):
         self.btn_return.setText(t("btn_return_empty", "Return Empty Bottles"))
         self.btn_refill.setText(t("btn_refill", "Refill 19L Bottles"))
         self.btn_expense.setText(t("btn_add_expense", "+ Add Expense"))
+        if hasattr(self, 'btn_daily_closing'):
+            self.btn_daily_closing.setText(f"💵 {t('nav_daily_closing', 'Daily Closing')}")
         if hasattr(self, 'lbl_b_title'):
             self.lbl_b_title.setText(t("returnable_bottle_balance", "19 L Returnable Bottle Balance:"))
         if hasattr(self, 'card_today_sales'):

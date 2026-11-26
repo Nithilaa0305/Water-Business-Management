@@ -26,6 +26,7 @@ from app.ui.history_page import HistoryPage
 from app.ui.settings_page import SettingsPage
 from app.services.auth_service import AuthService
 from app.database.models.auth import User
+from app.ui.dialogs.lock_screen_dialog import LockScreenDialog
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QLineEdit, QMessageBox
 from app.localization.translator import t, set_language, get_language
@@ -215,6 +216,10 @@ class MainWindow(QMainWindow):
             # Auto-refresh page data when navigated to
             if hasattr(widget, "refresh_dashboard"):
                 widget.refresh_dashboard()
+            elif hasattr(widget, "load_daily_data"):
+                widget.load_daily_data()
+                if hasattr(widget, "load_history_table"):
+                    widget.load_history_table()
             elif hasattr(widget, "load_stock_data"):
                 widget.load_stock_data()
             elif hasattr(widget, "load_bottle_data"):
@@ -261,6 +266,8 @@ class MainWindow(QMainWindow):
 
         # Top bar toggle
         self.btn_lang.setText("Language: English" if get_language() == "en" else "Language: தமிழ் (Tamil)")
+        if hasattr(self, 'btn_lock'):
+            self.btn_lock.setText(t("btn_lock_screen", "🔒 Lock Screen"))
 
         # Cascade to all registered pages
         for page_id, (idx, widget) in self.pages_map.items():
@@ -308,47 +315,18 @@ class MainWindow(QMainWindow):
                 self.lbl_user.setText(f"👤 {user.full_name} ({user.role})")
 
     def action_lock_screen(self):
-        """Quick lock screen for security; quick unlock via 4-digit PIN or password."""
+        """Quick lock screen for security; modal overlay prevents any unauthorized interactions."""
         AuthService.lock_screen()
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Screen Locked — Water Business Manager")
-        dlg.setFixedSize(380, 240)
-        dlg.setWindowFlags(dlg.windowFlags() | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
-        layout = QVBoxLayout(dlg)
-        layout.setSpacing(12)
-
-        lbl = QLabel("🔒 Application Locked")
-        lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #0284C7;")
-        layout.addWidget(lbl)
-
-        curr = AuthService.get_current_user()
-        u_name = curr.full_name if curr else "Owner"
-        layout.addWidget(QLabel(f"Enter PIN or Password for <b>{u_name}</b> to unlock:"))
-
-        txt_pass = QLineEdit()
-        txt_pass.setEchoMode(QLineEdit.Password)
-        txt_pass.setPlaceholderText("Enter 4-digit PIN or password...")
-        layout.addWidget(txt_pass)
-
-        btn_row = QHBoxLayout()
-        btn_unlock = QPushButton("🔓 Unlock")
-        btn_unlock.setStyleSheet("background-color: #0284C7; color: white; font-weight: bold; padding: 8px 16px;")
-
-        def try_unlock():
-            code = txt_pass.text().strip()
-            if not code:
-                return
-            with get_db_session() as session:
-                valid, msg = AuthService.unlock_screen(session, code)
-                if valid:
-                    dlg.accept()
-                else:
-                    QMessageBox.warning(dlg, "Access Denied", msg)
-                    txt_pass.clear()
-
-        btn_unlock.clicked.connect(try_unlock)
-        txt_pass.returnPressed.connect(try_unlock)
-        btn_row.addWidget(btn_unlock)
-        layout.addLayout(btn_row)
-        dlg.exec()
+        # Disable interaction on the underlying main application while locked
+        self.centralWidget().setEnabled(False)
+        try:
+            dlg = LockScreenDialog(self)
+            dlg.exec()
+        finally:
+            self.centralWidget().setEnabled(True)
+            curr = AuthService.get_current_user()
+            if curr:
+                self.lbl_user.setText(f"👤 {curr.full_name} ({curr.role})")
+            else:
+                self.init_user_session()
 

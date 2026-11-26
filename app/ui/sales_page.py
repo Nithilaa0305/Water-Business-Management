@@ -51,18 +51,23 @@ class SalesPage(QWidget):
 
         # Customer selection bar
         cust_bar = QFrame()
-        cust_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px;")
-        cust_layout = QHBoxLayout(cust_bar)
-        cust_layout.setContentsMargins(8, 8, 8, 8)
-        cust_layout.setSpacing(12)
+        cust_bar.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;")
+        cust_vlayout = QVBoxLayout(cust_bar)
+        cust_vlayout.setContentsMargins(10, 8, 10, 8)
+        cust_vlayout.setSpacing(8)
 
-        self.lbl_select_cust = QLabel("Customer:")
-        cust_layout.addWidget(self.lbl_select_cust)
+        # Row 1: Selection & Fast Action Buttons
+        cust_row1 = QHBoxLayout()
+        cust_row1.setSpacing(10)
+
+        self.lbl_select_cust = QLabel(t("select_customer", "Customer:"))
+        self.lbl_select_cust.setStyleSheet("font-weight: 600; font-size: 13px; color: #334155;")
+        cust_row1.addWidget(self.lbl_select_cust)
 
         self.cmb_customer = QComboBox()
         self.cmb_customer.setEditable(True)
         self.cmb_customer.setInsertPolicy(QComboBox.NoInsert)
-        self.cmb_customer.setMinimumWidth(340)
+        self.cmb_customer.setMinimumWidth(320)
         if self.cmb_customer.lineEdit():
             self.cmb_customer.lineEdit().setPlaceholderText("Search by ID (e.g. CUST-001) or Name...")
         self.cmb_customer.currentIndexChanged.connect(self.on_customer_selected)
@@ -70,35 +75,46 @@ class SalesPage(QWidget):
             self.cmb_customer.completer().setFilterMode(Qt.MatchContains)
             self.cmb_customer.completer().setCaseSensitivity(Qt.CaseInsensitive)
             self.cmb_customer.completer().setCompletionMode(QCompleter.PopupCompletion)
-        cust_layout.addWidget(self.cmb_customer)
+        cust_row1.addWidget(self.cmb_customer, 3)
 
-        self.btn_walkin = QPushButton("🚶 Walk-in Cash")
+        self.btn_walkin = QPushButton(t("walkin_customer", "🚶 Walk-in Cash"))
         self.btn_walkin.setObjectName("SecondaryButton")
         self.btn_walkin.setToolTip("Quickly select Anonymous Walk-in Cash Customer")
         self.btn_walkin.clicked.connect(self.select_walkin_customer)
-        cust_layout.addWidget(self.btn_walkin)
+        cust_row1.addWidget(self.btn_walkin)
 
-        self.btn_cust_prices = QPushButton("💲 Pre-Set Prices")
+        self.btn_cust_prices = QPushButton(t("btn_prices", "💲 Pre-Set Prices"))
         self.btn_cust_prices.setObjectName("SecondaryButton")
         self.btn_cust_prices.setToolTip("View or pre-configure agreed product selling prices for this customer")
         self.btn_cust_prices.clicked.connect(self.open_selected_customer_prices)
-        cust_layout.addWidget(self.btn_cust_prices)
+        cust_row1.addWidget(self.btn_cust_prices)
 
-        self.btn_repeat_order = QPushButton("🔁 Repeat Last Order")
+        self.btn_repeat_order = QPushButton(t("btn_repeat_order", "🔁 Repeat Last Order"))
         self.btn_repeat_order.setObjectName("SecondaryButton")
         self.btn_repeat_order.setToolTip("1-Click repeat order from this customer's previous bill, revalidating stock & prices")
         self.btn_repeat_order.clicked.connect(self.action_repeat_last_order)
-        cust_layout.addWidget(self.btn_repeat_order)
+        cust_row1.addWidget(self.btn_repeat_order)
+
+        cust_row1.addStretch()
+        cust_vlayout.addLayout(cust_row1)
+
+        # Row 2: Customer Live Status Badges (Financial balance & 19L bottles)
+        cust_row2 = QHBoxLayout()
+        cust_row2.setSpacing(12)
 
         self.lbl_cust_financial = QLabel("Account Settled")
-        self.lbl_cust_financial.setStyleSheet("font-weight: bold; color: #0284C7; font-size: 13px;")
-        cust_layout.addWidget(self.lbl_cust_financial)
+        self.lbl_cust_financial.setWordWrap(True)
+        self.lbl_cust_financial.setStyleSheet("background-color: #F0FDF4; color: #166534; font-weight: bold; font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid #BBF7D0;")
+        cust_row2.addWidget(self.lbl_cust_financial)
 
         self.lbl_cust_bottles = QLabel("19L Bottles: 0")
-        self.lbl_cust_bottles.setStyleSheet("font-weight: bold; color: #2563EB; font-size: 13px;")
-        cust_layout.addWidget(self.lbl_cust_bottles)
+        self.lbl_cust_bottles.setWordWrap(True)
+        self.lbl_cust_bottles.setStyleSheet("background-color: #EFF6FF; color: #1E40AF; font-weight: bold; font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid #BFDBFE;")
+        cust_row2.addWidget(self.lbl_cust_bottles)
 
-        cust_layout.addStretch()
+        cust_row2.addStretch()
+        cust_vlayout.addLayout(cust_row2)
+
         main_layout.addWidget(cust_bar)
 
         # Item Entry Row
@@ -245,6 +261,7 @@ class SalesPage(QWidget):
         tot_layout.addLayout(alloc_row)
 
         self.lbl_alloc_breakdown = QLabel("")
+        self.lbl_alloc_breakdown.setWordWrap(True)
         self.lbl_alloc_breakdown.setStyleSheet("color: #475569; font-size: 11px; padding-top: 2px;")
         tot_layout.addWidget(self.lbl_alloc_breakdown)
 
@@ -290,14 +307,38 @@ class SalesPage(QWidget):
             self.btn_walkin.setText(t("walkin_customer", "🚶 Walk-in Cash"))
         if hasattr(self, 'btn_cust_prices'):
             self.btn_cust_prices.setText(t("btn_prices", "💲 Pre-Set Prices"))
+        if hasattr(self, 'btn_repeat_order'):
+            self.btn_repeat_order.setText(t("btn_repeat_order", "🔁 Repeat Last Order"))
         if hasattr(self, 'chk_save_agreed_prices'):
             self.chk_save_agreed_prices.setText(t("save_as_agreed_prices", "Update customer's agreed prices with the unit prices on this bill"))
+        if hasattr(self, 'table_items'):
+            self.table_items.setHorizontalHeaderLabels([
+                t("col_product", "Product"),
+                t("col_unit", "Packaging Unit"),
+                t("col_qty", "Qty"),
+                t("col_price", "Unit Price"),
+                t("col_line_total", "Line Total"),
+                t("col_bottle_action", "19L Bottle"),
+                t("col_action", "Action")
+            ])
+        if hasattr(self, 'cmb_alloc_mode'):
+            curr_mode = self.cmb_alloc_mode.currentData()
+            self.cmb_alloc_mode.blockSignals(True)
+            self.cmb_alloc_mode.clear()
+            self.cmb_alloc_mode.addItem(t("alloc_current", "Current Invoice"), "CURRENT_INVOICE")
+            self.cmb_alloc_mode.addItem(t("alloc_oldest", "Oldest Outstanding Debt"), "OLDEST_INVOICES")
+            self.cmb_alloc_mode.addItem(t("alloc_advance", "Customer Advance"), "ADVANCE")
+            idx = self.cmb_alloc_mode.findData(curr_mode)
+            if idx >= 0:
+                self.cmb_alloc_mode.setCurrentIndex(idx)
+            self.cmb_alloc_mode.blockSignals(False)
+        self.load_customers()
 
     def load_customers(self):
         curr_id = self.cmb_customer.currentData() if hasattr(self, 'cmb_customer') else None
         self.cmb_customer.blockSignals(True)
         self.cmb_customer.clear()
-        self.cmb_customer.addItem("🚶 Walk-in Cash Customer (Anonymous)", None)
+        self.cmb_customer.addItem(f"{t('walkin_customer', '🚶 Walk-in Cash')} (Anonymous)", None)
         with get_db_session() as session:
             customers = session.query(Customer).filter_by(is_active=True).order_by(Customer.code.asc()).all()
             for c in customers:

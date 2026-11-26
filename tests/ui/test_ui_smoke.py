@@ -34,15 +34,22 @@ def test_main_window_pages_and_navigation(qapp, db_session):
     assert win.btn_lang.text() == "Language: தமிழ் (Tamil)"
     assert win.nav_buttons["dashboard"].text() == "முகப்பு பலகை"
     assert win.page_dashboard.lbl_title.text() == "முகப்பு பலகை"
+    assert win.page_daily_closing.lbl_title.text() == "தினசரி பணப்பெட்டி கணக்கு சரிபார்த்தல்"
 
     win.toggle_language()
     assert win.btn_lang.text() == "Language: English"
     assert win.nav_buttons["dashboard"].text() == "Dashboard"
     assert win.page_dashboard.lbl_title.text() == "Dashboard"
+    assert win.page_daily_closing.lbl_title.text() == "Daily Cash Closing & Drawer Reconciliation"
     win.close()
 
 
 def test_dialogs_instantiation(qapp, db_session):
+    from app.ui.dialogs.lock_screen_dialog import LockScreenDialog
+    d_lock = LockScreenDialog()
+    assert d_lock.lbl_lock_title is not None
+    d_lock.close()
+
     d1 = PaymentDialog()
     assert d1.cmb_customer.count() >= 0
     d1.close()

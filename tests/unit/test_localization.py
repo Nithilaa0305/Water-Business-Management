@@ -9,10 +9,17 @@ def test_bilingual_translations():
     set_language("en")
     assert t("nav_dashboard") == "Dashboard"
     assert t("nav_sales") == "New Bill / Sales"
+    assert t("nav_daily_closing") == "Daily Closing"
+    assert t("denom_5000") == "Rs. 5,000 Note"
 
     set_language("ta")
     assert t("nav_dashboard") == "முகப்பு பலகை"
     assert t("nav_sales") == "புதிய பில் / விற்பனை"
+    assert t("nav_daily_closing") == "தினசரி கணக்கு முடிவு"
+    assert t("denom_5000") == "ரூ. 5,000 தாள்"
+    assert t("screen_locked") == "பயன்பாடு பூட்டப்பட்டுள்ளது"
+    assert t("btn_repeat_order") == "🔁 முந்தைய ஆர்டரை மீண்டும் செய்க"
+    assert t("alloc_current") == "தற்போதைய பில்"
 
     # Reset
     set_language("en")

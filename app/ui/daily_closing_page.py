@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSpinBox, QDoubleSpinBox, QFrame, QMessageBox, QDateEdit, QGridLayout, QTextEdit
+    QSpinBox, QDoubleSpinBox, QFrame, QMessageBox, QDateEdit, QGridLayout, QTextEdit, QScrollArea, QDialog
 )
 from PySide6.QtCore import Qt, QDate
 from app.database.connection import get_db_session
@@ -21,9 +21,23 @@ class DailyClosingPage(QWidget):
         super().__init__(parent)
         self.main_window = main_window
         self.denom_spinboxes: Dict[str, QSpinBox] = {}
+        self.denom_name_labels: Dict[str, QLabel] = {}
+        self.denom_subtotal_labels: Dict[str, QLabel] = {}
         self.current_summary: Dict[str, Any] = {}
 
-        main_layout = QVBoxLayout(self)
+        # Outer Layout containing Scroll Area to prevent any overflow or clipping
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background-color: #F8FAFC; border: none; }")
+
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: #F8FAFC;")
+        main_layout = QVBoxLayout(scroll_content)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(14)
 
@@ -41,7 +55,10 @@ class DailyClosingPage(QWidget):
 
         # Date Selector
         date_box = QHBoxLayout()
-        date_box.addWidget(QLabel("Closing Date:"))
+        self.lbl_date_prompt = QLabel(t("closing_date", "Closing Date:"))
+        self.lbl_date_prompt.setStyleSheet("font-weight: 600; color: #334155;")
+        date_box.addWidget(self.lbl_date_prompt)
+
         self.date_picker = QDateEdit()
         self.date_picker.setCalendarPopup(True)
         today = today_colombo()
@@ -49,7 +66,7 @@ class DailyClosingPage(QWidget):
         self.date_picker.dateChanged.connect(self.load_daily_data)
         date_box.addWidget(self.date_picker)
 
-        self.btn_refresh = QPushButton("🔄 Refresh Totals")
+        self.btn_refresh = QPushButton(t("refresh_totals", "🔄 Refresh Totals"))
         self.btn_refresh.setObjectName("SecondaryButton")
         self.btn_refresh.clicked.connect(self.load_daily_data)
         date_box.addWidget(self.btn_refresh)
@@ -60,19 +77,22 @@ class DailyClosingPage(QWidget):
         content_layout = QHBoxLayout()
         content_layout.setSpacing(16)
 
-        # LEFT COLUMN: Expected Cash & Summary
+        # LEFT COLUMN: Expected Cash & Summary Breakdown
         left_frame = QFrame()
         left_frame.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px;")
         left_layout = QVBoxLayout(left_frame)
         left_layout.setSpacing(8)
 
-        lbl_sec1 = QLabel("💵 Drawer Reconciliation Breakdown")
-        lbl_sec1.setStyleSheet("font-size: 16px; font-weight: bold; color: #0284C7; border-bottom: 2px solid #E2E8F0; padding-bottom: 6px;")
-        left_layout.addWidget(lbl_sec1)
+        self.lbl_sec1 = QLabel(t("drawer_reconciliation", "💵 Drawer Reconciliation Breakdown"))
+        self.lbl_sec1.setStyleSheet("font-size: 16px; font-weight: bold; color: #0284C7; border-bottom: 2px solid #E2E8F0; padding-bottom: 6px;")
+        left_layout.addWidget(self.lbl_sec1)
 
         # Opening Float Input
         open_row = QHBoxLayout()
-        open_row.addWidget(QLabel("Opening Cash Float (Rs.):"))
+        self.lbl_open_float = QLabel(t("opening_float", "Opening Cash Float (Rs.):"))
+        self.lbl_open_float.setStyleSheet("font-weight: 500; color: #334155;")
+        open_row.addWidget(self.lbl_open_float)
+
         self.spin_opening_cash = QDoubleSpinBox()
         self.spin_opening_cash.setRange(0, 10000000)
         self.spin_opening_cash.setDecimals(2)
@@ -93,7 +113,7 @@ class DailyClosingPage(QWidget):
         self.lbl_refunds.setStyleSheet("color: #DC2626;")
 
         for lbl in [self.lbl_cash_sales, self.lbl_credit_coll, self.lbl_advances, self.lbl_deposits]:
-            lbl.setStyleSheet("color: #166534; font-size: 13px;")
+            lbl.setStyleSheet("color: #166534; font-size: 13px; font-weight: 500;")
             left_layout.addWidget(lbl)
 
         line = QFrame()
@@ -102,7 +122,7 @@ class DailyClosingPage(QWidget):
         left_layout.addWidget(line)
 
         for lbl in [self.lbl_expenses, self.lbl_supplier_pay, self.lbl_refunds]:
-            lbl.setStyleSheet("color: #B91C1C; font-size: 13px;")
+            lbl.setStyleSheet("color: #B91C1C; font-size: 13px; font-weight: 500;")
             left_layout.addWidget(lbl)
 
         # Expected Total Box
@@ -127,19 +147,22 @@ class DailyClosingPage(QWidget):
         left_layout.addWidget(var_box)
 
         # Notes
-        left_layout.addWidget(QLabel("Notes / Variance Explanation:"))
+        self.lbl_notes_prompt = QLabel(t("notes_label", "Notes / Variance Explanation:"))
+        self.lbl_notes_prompt.setStyleSheet("font-weight: 500; color: #334155;")
+        left_layout.addWidget(self.lbl_notes_prompt)
+
         self.txt_notes = QLineEdit()
         self.txt_notes.setPlaceholderText("Optional notes or explanation for any cash difference...")
         left_layout.addWidget(self.txt_notes)
 
         # Action Buttons
         btn_action_row = QHBoxLayout()
-        self.btn_finalize = QPushButton("💾 Finalize Daily Closing")
+        self.btn_finalize = QPushButton(t("finalize_closing", "💾 Finalize Daily Closing"))
         self.btn_finalize.setStyleSheet("background-color: #0284C7; color: white; font-weight: bold; padding: 10px 18px;")
         self.btn_finalize.clicked.connect(self.action_finalize_closing)
         btn_action_row.addWidget(self.btn_finalize)
 
-        self.btn_print = QPushButton("🖨 Print Report")
+        self.btn_print = QPushButton(t("print_report", "🖨 Print Report"))
         self.btn_print.setObjectName("SecondaryButton")
         self.btn_print.clicked.connect(self.action_print_report)
         btn_action_row.addWidget(self.btn_print)
@@ -152,23 +175,28 @@ class DailyClosingPage(QWidget):
         right_frame.setStyleSheet("background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px;")
         right_layout = QVBoxLayout(right_frame)
 
-        lbl_sec2 = QLabel("🔢 Currency Denomination Counter")
-        lbl_sec2.setStyleSheet("font-size: 16px; font-weight: bold; color: #0284C7; border-bottom: 2px solid #E2E8F0; padding-bottom: 6px;")
-        right_layout.addWidget(lbl_sec2)
+        self.lbl_sec2 = QLabel(t("drawer_reconciliation", "🔢 Currency Denomination Counter"))
+        self.lbl_sec2.setStyleSheet("font-size: 16px; font-weight: bold; color: #0284C7; border-bottom: 2px solid #E2E8F0; padding-bottom: 6px;")
+        right_layout.addWidget(self.lbl_sec2)
 
         grid = QGridLayout()
         grid.setSpacing(8)
-        grid.addWidget(QLabel("<b>Denomination</b>"), 0, 0)
-        grid.addWidget(QLabel("<b>Count</b>"), 0, 1)
-        grid.addWidget(QLabel("<b>Subtotal (Rs.)</b>"), 0, 2)
-
-        self.denom_subtotal_labels: Dict[str, QLabel] = {}
+        self.lbl_hdr_denom = QLabel("<b>Denomination</b>")
+        self.lbl_hdr_count = QLabel("<b>Count</b>")
+        self.lbl_hdr_subtot = QLabel("<b>Subtotal (Rs.)</b>")
+        grid.addWidget(self.lbl_hdr_denom, 0, 0)
+        grid.addWidget(self.lbl_hdr_count, 0, 1)
+        grid.addWidget(self.lbl_hdr_subtot, 0, 2)
 
         for row, d in enumerate(SL_DENOMINATIONS, start=1):
             key = str(d["value_rs"])
-            name_lbl = QLabel(d["name"])
-            name_lbl.setStyleSheet("font-weight: 500;")
+            t_key = f"denom_{d['value_rs']}"
+            display_name = t(t_key, d["name"])
+
+            name_lbl = QLabel(display_name)
+            name_lbl.setStyleSheet("font-weight: 500; font-size: 13px; color: #334155;")
             grid.addWidget(name_lbl, row, 0)
+            self.denom_name_labels[key] = name_lbl
 
             spin = QSpinBox()
             spin.setRange(0, 100000)
@@ -178,35 +206,44 @@ class DailyClosingPage(QWidget):
             self.denom_spinboxes[key] = spin
 
             sub_lbl = QLabel("Rs. 0.00")
-            sub_lbl.setStyleSheet("color: #475569; font-weight: 500;")
+            sub_lbl.setStyleSheet("color: #475569; font-weight: 600; font-size: 13px;")
             grid.addWidget(sub_lbl, row, 2)
             self.denom_subtotal_labels[key] = sub_lbl
 
         right_layout.addLayout(grid)
 
         # Clear Denominations button
-        btn_clear_denom = QPushButton("Clear Denomination Counts")
-        btn_clear_denom.setObjectName("SecondaryButton")
-        btn_clear_denom.clicked.connect(self.clear_denominations)
-        right_layout.addWidget(btn_clear_denom)
+        self.btn_clear_denom = QPushButton(t("clear_denominations", "Clear Denomination Counts"))
+        self.btn_clear_denom.setObjectName("SecondaryButton")
+        self.btn_clear_denom.clicked.connect(self.clear_denominations)
+        right_layout.addWidget(self.btn_clear_denom)
         right_layout.addStretch()
 
         content_layout.addWidget(right_frame, 5)
         main_layout.addLayout(content_layout)
 
         # Bottom Past Closings Table
-        lbl_hist = QLabel("Recent Daily Closings History")
-        lbl_hist.setStyleSheet("font-size: 15px; font-weight: bold; color: #334155;")
-        main_layout.addWidget(lbl_hist)
+        self.lbl_hist = QLabel(t("recent_closings_history", "Recent Daily Closings History"))
+        self.lbl_hist.setStyleSheet("font-size: 15px; font-weight: bold; color: #334155; margin-top: 10px;")
+        main_layout.addWidget(self.lbl_hist)
 
         self.table_history = QTableWidget()
         self.table_history.setColumnCount(7)
         self.table_history.setHorizontalHeaderLabels([
-            "Ref #", "Date", "Opening Cash", "Expected Cash", "Actual Counted", "Difference", "Status"
+            t("col_ref_num", "Ref #"),
+            t("col_date", "Date"),
+            t("col_open_cash", "Opening Cash"),
+            t("col_expected_cash", "Expected Cash"),
+            t("col_actual_counted", "Actual Counted"),
+            t("col_difference", "Difference"),
+            t("col_status", "Status")
         ])
         self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table_history.setMaximumHeight(160)
+        self.table_history.setMinimumHeight(180)
         main_layout.addWidget(self.table_history)
+
+        scroll.setWidget(scroll_content)
+        outer_layout.addWidget(scroll)
 
         self.load_daily_data()
         self.load_history_table()
@@ -231,15 +268,15 @@ class DailyClosingPage(QWidget):
 
             self.current_summary = summary
 
-        # Populate labels
-        self.lbl_cash_sales.setText(f"Cash Water Sales: {summary['cash_sales_display']}")
-        self.lbl_credit_coll.setText(f"Credit Collections (Cash): {summary['credit_collections_display']}")
-        self.lbl_advances.setText(f"Customer Advances (Cash): {summary['customer_advances_display']}")
-        self.lbl_deposits.setText(f"Bottle Deposits (Cash): {summary['deposits_collected_display']}")
+        # Populate labels with localized prefixes
+        self.lbl_cash_sales.setText(f"{t('cash_sales_label', 'Cash Water Sales:')} {summary['cash_sales_display']}")
+        self.lbl_credit_coll.setText(f"{t('credit_coll_label', 'Credit Collections (Cash):')} {summary['credit_collections_display']}")
+        self.lbl_advances.setText(f"{t('advances_label', 'Customer Advances (Cash):')} {summary['customer_advances_display']}")
+        self.lbl_deposits.setText(f"{t('deposits_label', 'Bottle Deposits (Cash):')} {summary['deposits_collected_display']}")
 
-        self.lbl_expenses.setText(f"Cash Expenses: -{summary['cash_expenses_display']}")
-        self.lbl_supplier_pay.setText(f"Supplier Cash Payments: -{summary['supplier_payments_display']}")
-        self.lbl_refunds.setText(f"Deposit Refunds Paid: -{summary['deposit_refunds_display']}")
+        self.lbl_expenses.setText(f"{t('expenses_label', 'Cash Expenses:')} -{summary['cash_expenses_display']}")
+        self.lbl_supplier_pay.setText(f"{t('supplier_pay_label', 'Supplier Cash Payments:')} -{summary['supplier_payments_display']}")
+        self.lbl_refunds.setText(f"{t('refunds_label', 'Deposit Refunds Paid:')} -{summary['deposit_refunds_display']}")
 
         self.recalculate_variance()
 
@@ -253,32 +290,28 @@ class DailyClosingPage(QWidget):
                 self.denom_subtotal_labels[k].setText(format_currency(subtot_cents))
 
         total_counted_cents = DailyClosingService.calculate_counted_from_denominations(counts)
-        self.lbl_counted_total.setText(f"PHYSICAL COUNTED CASH: {format_currency(total_counted_cents)}")
+        self.lbl_counted_total.setText(f"{t('counted_cash_label', 'PHYSICAL COUNTED CASH:')} {format_currency(total_counted_cents)}")
         self.recalculate_variance()
 
     def recalculate_variance(self):
         open_cents = to_cents(self.spin_opening_cash.value())
-        total_inflow = (
-            self.current_summary.get("total_inflow_cents", 0)
-        )
-        total_outflow = (
-            self.current_summary.get("total_outflow_cents", 0)
-        )
+        total_inflow = self.current_summary.get("total_inflow_cents", 0)
+        total_outflow = self.current_summary.get("total_outflow_cents", 0)
         expected_cents = open_cents + total_inflow - total_outflow
-        self.lbl_expected_cash.setText(f"EXPECTED DRAWER CASH: {format_currency(expected_cents)}")
+        self.lbl_expected_cash.setText(f"{t('expected_cash_label', 'EXPECTED DRAWER CASH:')} {format_currency(expected_cents)}")
 
         counts = {k: sp.value() for k, sp in self.denom_spinboxes.items()}
         actual_cents = DailyClosingService.calculate_counted_from_denominations(counts)
 
         diff = actual_cents - expected_cents
         if diff == 0:
-            self.lbl_variance.setText("VARIANCE: BALANCED (Rs. 0.00)")
+            self.lbl_variance.setText(f"{t('variance_balanced', 'VARIANCE: BALANCED')} (Rs. 0.00)")
             self.lbl_variance.setStyleSheet("font-size: 15px; font-weight: bold; color: #16A34A;")
         elif diff > 0:
-            self.lbl_variance.setText(f"VARIANCE: SURPLUS (+{format_currency(diff)})")
+            self.lbl_variance.setText(f"{t('variance_surplus', 'VARIANCE: SURPLUS')} (+{format_currency(diff)})")
             self.lbl_variance.setStyleSheet("font-size: 15px; font-weight: bold; color: #0284C7;")
         else:
-            self.lbl_variance.setText(f"VARIANCE: SHORTAGE ({format_currency(diff)})")
+            self.lbl_variance.setText(f"{t('variance_shortage', 'VARIANCE: SHORTAGE')} ({format_currency(diff)})")
             self.lbl_variance.setStyleSheet("font-size: 15px; font-weight: bold; color: #DC2626;")
 
     def clear_denominations(self):
@@ -344,7 +377,6 @@ class DailyClosingPage(QWidget):
 
             report_text = DailyClosingService.generate_closing_report_text(closing)
 
-        from PySide6.QtWidgets import QDialog, QTextEdit, QVBoxLayout
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Closing Report — {closing.closing_number}")
         dlg.resize(550, 600)
@@ -376,3 +408,39 @@ class DailyClosingPage(QWidget):
                 self.table_history.setItem(row, 5, diff_item)
 
                 self.table_history.setItem(row, 6, QTableWidgetItem(c.status))
+
+    def retranslate_ui(self):
+        """Update texts when language toggles."""
+        self.lbl_title.setText(t("daily_closing_title", "Daily Cash Closing & Drawer Reconciliation"))
+        self.lbl_sub.setText(t("daily_closing_sub", "Reconcile daily cash collections, expenses, and physical drawer denominations"))
+        self.lbl_date_prompt.setText(t("closing_date", "Closing Date:"))
+        self.btn_refresh.setText(t("refresh_totals", "🔄 Refresh Totals"))
+        self.lbl_sec1.setText(t("drawer_reconciliation", "💵 Drawer Reconciliation Breakdown"))
+        self.lbl_open_float.setText(t("opening_float", "Opening Cash Float (Rs.):"))
+        self.lbl_sec2.setText(t("drawer_reconciliation", "🔢 Currency Denomination Counter"))
+        self.lbl_notes_prompt.setText(t("notes_label", "Notes / Variance Explanation:"))
+        self.btn_finalize.setText(t("finalize_closing", "💾 Finalize Daily Closing"))
+        self.btn_print.setText(t("print_report", "🖨 Print Report"))
+        self.btn_clear_denom.setText(t("clear_denominations", "Clear Denomination Counts"))
+        self.lbl_hist.setText(t("recent_closings_history", "Recent Daily Closings History"))
+
+        # Update denomination names in grid
+        for d in SL_DENOMINATIONS:
+            key = str(d["value_rs"])
+            t_key = f"denom_{d['value_rs']}"
+            if key in self.denom_name_labels:
+                self.denom_name_labels[key].setText(t(t_key, d["name"]))
+
+        # Update table history headers
+        self.table_history.setHorizontalHeaderLabels([
+            t("col_ref_num", "Ref #"),
+            t("col_date", "Date"),
+            t("col_open_cash", "Opening Cash"),
+            t("col_expected_cash", "Expected Cash"),
+            t("col_actual_counted", "Actual Counted"),
+            t("col_difference", "Difference"),
+            t("col_status", "Status")
+        ])
+
+        self.load_daily_data()
+        self.load_history_table()

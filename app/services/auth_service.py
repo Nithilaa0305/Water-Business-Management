@@ -60,25 +60,43 @@ class AuthService:
 
     @classmethod
     def unlock_screen(cls, session: Session, pin_or_password: str) -> Tuple[bool, str]:
-        """Unlock screen for current user using their PIN or password."""
-        if not cls._current_user:
-            return False, "No active user session to unlock."
+        """Unlock screen for current user using their PIN or password, or master owner credentials."""
+        code = (pin_or_password or "").strip()
+        if not code:
+            return False, "Please enter your PIN or password."
 
-        user = session.query(User).filter_by(id=cls._current_user.id, is_active=True).first()
-        if not user:
-            return False, "User not found or inactive."
+        # Verify against current user first
+        if cls._current_user:
+            user = session.query(User).filter_by(id=cls._current_user.id, is_active=True).first()
+            if user:
+                if user.pin_hash and verify_password(code, user.pin_hash):
+                    cls._screen_locked = False
+                    return True, "Unlocked"
+                if user.password_hash and verify_password(code, user.password_hash):
+                    cls._screen_locked = False
+                    return True, "Unlocked"
 
-        # Verify against PIN first if 4-6 digits, then password
-        valid = False
-        if user.pin_hash and verify_password(pin_or_password, user.pin_hash):
-            valid = True
-        elif user.password_hash and verify_password(pin_or_password, user.password_hash):
-            valid = True
+        # Allow any active OWNER or MANAGER credentials to unlock terminal
+        masters = session.query(User).filter(
+            User.role.in_([UserRole.OWNER.value, UserRole.MANAGER.value]),
+            User.is_active == True
+        ).all()
+        for m in masters:
+            if m.pin_hash and verify_password(code, m.pin_hash):
+                cls._screen_locked = False
+                cls._current_user = m
+                return True, "Unlocked"
+            if m.password_hash and verify_password(code, m.password_hash):
+                cls._screen_locked = False
+                cls._current_user = m
+                return True, "Unlocked"
 
-        if valid:
-            cls._screen_locked = False
-            return True, "Unlocked"
         return False, "Invalid PIN or password."
+
+    @classmethod
+    def logout(cls) -> None:
+        """Alias for logout_user."""
+        cls.logout_user()
 
     @classmethod
     def get_current_role(cls) -> str:
